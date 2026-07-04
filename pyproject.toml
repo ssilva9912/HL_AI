@@ -4,7 +4,9 @@ version = "0.1.0"
 description = "A modular local AI platform for offline knowledge search and homelab integration."
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "httpx>=0.28.1",
+]
 
 [dependency-groups]
 dev = [
