@@ -14,5 +14,4 @@ class DocumentChunk:
 
 
 class Chunker(Protocol):
-    def chunk(self, document: ParsedDocument) -> list[DocumentChunk]:
-        ...
+    def chunk(self, document: ParsedDocument) -> list[DocumentChunk]: ...
