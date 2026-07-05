@@ -1,0 +1,1 @@
+Homelab AI is a local retrieval augmented generation system. It scans documents, chunks text, embeds chunks, and stores vectors.
