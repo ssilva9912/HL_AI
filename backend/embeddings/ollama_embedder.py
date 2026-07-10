@@ -15,21 +15,34 @@ class OllamaEmbedder:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
 
-    def embed(self, chunk: DocumentChunk) -> EmbeddedChunk:
+    def embed_text(self, text: str) -> list[float]:
+        if not text.strip():
+            raise ValueError("text must not be empty")
+
         response = httpx.post(
             f"{self.base_url}/api/embed",
             json={
                 "model": self.model,
-                "input": chunk.content,
+                "input": text,
             },
             timeout=self.timeout,
         )
         response.raise_for_status()
 
         data = response.json()
-        vector = data["embeddings"][0]
 
-        return EmbeddedChunk(chunk=chunk, vector=vector)
+        try:
+            vector = data["embeddings"][0]
+        except (KeyError, IndexError, TypeError) as error:
+            raise ValueError("Ollama returned an invalid embedding response") from error
+
+        return vector
+
+    def embed(self, chunk: DocumentChunk) -> EmbeddedChunk:
+        return EmbeddedChunk(
+            chunk=chunk,
+            vector=self.embed_text(chunk.content),
+        )
 
     def embed_many(self, chunks: list[DocumentChunk]) -> list[EmbeddedChunk]:
         return [self.embed(chunk) for chunk in chunks]
