@@ -1,0 +1,1 @@
+Dense retrieval uses vector embeddings to find semantically related content. It can retrieve relevant passages even when the query uses different wording from the original document.

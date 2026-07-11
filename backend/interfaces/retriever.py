@@ -9,6 +9,7 @@ class RetrievalResult:
     chunk: DocumentChunk
     score: float
     retriever: str
+    original_score: float | None = None
 
 
 class Retriever(Protocol):

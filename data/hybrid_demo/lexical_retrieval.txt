@@ -1,0 +1,1 @@
+BM25 performs lexical retrieval. It is especially useful for exact terms, filenames, function names, error messages, and identifiers such as source_document, api_embed, and chunk_index.

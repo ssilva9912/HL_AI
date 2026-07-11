@@ -1,0 +1,1 @@
+Homelab AI is a local retrieval augmented generation platform. The system separates document parsing, chunking, embedding, storage, retrieval, reranking, and generation into modular components.
