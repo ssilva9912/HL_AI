@@ -57,7 +57,7 @@ class HybridRetriever:
 
         ranked_keys = sorted(
             fused_scores,
-            key=fused_scores.get,
+            key=lambda key: fused_scores[key],
             reverse=True,
         )
 

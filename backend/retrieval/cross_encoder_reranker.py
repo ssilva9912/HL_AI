@@ -13,7 +13,7 @@ class CrossEncoderModel(Protocol):
         *,
         batch_size: int,
         show_progress_bar: bool,
-    ) -> object: ...
+    ) -> Sequence[float]: ...
 
 
 ModelFactory = Callable[[str], CrossEncoderModel]
@@ -68,7 +68,7 @@ class CrossEncoderReranker:
             show_progress_bar=False,
         )
 
-        scores = [float(score) for score in raw_scores]  # type: ignore[union-attr]
+        scores = [float(score) for score in raw_scores]
 
         if len(scores) != len(results):
             raise RuntimeError(
