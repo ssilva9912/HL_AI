@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from backend.chunking.fixed_size_chunker import FixedSizeChunker
+from backend.chunking.semantic_chunker import SemanticChunker
 from backend.embeddings.ollama_embedder import OllamaEmbedder
 from backend.ingestion.scanner import FileMetadata
 from backend.parser.text_parser import TextParser
@@ -19,7 +19,7 @@ def main() -> None:
         )
 
     parser = TextParser()
-    chunker = FixedSizeChunker()
+    chunker = SemanticChunker()
     embedder = OllamaEmbedder()
     vector_store = InMemoryVectorStore()
 
