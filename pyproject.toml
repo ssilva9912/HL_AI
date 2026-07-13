@@ -52,3 +52,7 @@ addopts = [
     "-q",
     "--strict-markers",
 ]
+
+markers = [
+    "integration: tests that require external local services such as Ollama",
+]
