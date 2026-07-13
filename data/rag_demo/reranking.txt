@@ -1,1 +1,1 @@
-A cross-encoder reranker evaluates the question and each retrieved passage together. It reorders candidate passages according to their estimated relevance to the question.
+After rank fusion, Homelab AI uses a cross-encoder reranker. The reranker evaluates the question and each retrieved passage together, then reorders candidate passages according to their estimated relevance to the question.

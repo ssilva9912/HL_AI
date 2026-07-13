@@ -1,1 +1,1 @@
-Dense retrieval uses vector embeddings to locate semantically related content. It can find relevant passages even when a question uses different wording from the original document.
+Homelab AI uses dense retrieval alongside BM25. Dense retrieval uses vector embeddings to locate semantically related content, even when a question uses different wording from the original document.

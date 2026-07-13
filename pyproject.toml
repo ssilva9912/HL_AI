@@ -5,9 +5,11 @@ description = "A modular local AI platform for offline knowledge search and home
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "fastapi>=0.139.0",
     "httpx>=0.28.1",
     "rank-bm25>=0.2.2",
     "sentence-transformers>=5.6.0",
+    "uvicorn>=0.51.0",
 ]
 
 [dependency-groups]
@@ -17,6 +19,7 @@ dev = [
     "pytest>=8.4.0",
     "pytest-cov>=6.2.0",
     "pytest-xdist>=3.8.0",
+    "httpx>=0.28.1",
 ]
 
 [tool.ruff]

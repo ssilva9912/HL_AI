@@ -1,1 +1,1 @@
-BM25 performs lexical retrieval. It is useful for exact terms, filenames, identifiers, error messages, and function names.
+Homelab AI uses BM25 for lexical retrieval. BM25 is useful for matching exact terms, filenames, identifiers, error messages, and function names that appear in indexed documents.

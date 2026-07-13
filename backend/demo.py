@@ -16,28 +16,33 @@ def create_demo_documents(directory: Path) -> list[Path]:
 
     documents = {
         "architecture.txt": (
-            "Homelab AI is a local retrieval augmented generation platform. "
+            "Homelab AI is a local retrieval-augmented generation platform. "
             "The system separates document parsing, semantic chunking, embedding, "
-            "storage, retrieval, reranking, prompt construction, and generation "
-            "into modular components."
+            "storage, lexical retrieval, dense retrieval, rank fusion, reranking, "
+            "prompt construction, and generation into modular components."
         ),
         "bm25.txt": (
-            "BM25 performs lexical retrieval. It is useful for exact terms, "
-            "filenames, identifiers, error messages, and function names."
+            "Homelab AI uses BM25 for lexical retrieval. "
+            "BM25 is useful for matching exact terms, filenames, identifiers, "
+            "error messages, and function names that appear in indexed documents."
         ),
         "dense_retrieval.txt": (
+            "Homelab AI uses dense retrieval alongside BM25. "
             "Dense retrieval uses vector embeddings to locate semantically related "
-            "content. It can find relevant passages even when a question uses "
-            "different wording from the original document."
+            "content, even when a question uses different wording from the "
+            "original document."
         ),
         "fusion.txt": (
-            "Reciprocal Rank Fusion combines ranked results from BM25 and dense "
-            "retrieval. RRF uses the rank position from each retriever instead of "
-            "directly comparing incompatible raw similarity scores."
+            "Homelab AI uses Reciprocal Rank Fusion to combine results from its "
+            "BM25 and dense retrievers. These retrievers produce different kinds "
+            "of raw scores that should not be averaged directly. RRF avoids that "
+            "problem by combining results according to their rank positions rather "
+            "than comparing their incompatible similarity scores."
         ),
         "reranking.txt": (
-            "A cross-encoder reranker evaluates the question and each retrieved "
-            "passage together. It reorders candidate passages according to their "
+            "After rank fusion, Homelab AI uses a cross-encoder reranker. "
+            "The reranker evaluates the question and each retrieved passage "
+            "together, then reorders candidate passages according to their "
             "estimated relevance to the question."
         ),
     }
@@ -52,7 +57,10 @@ def create_demo_documents(directory: Path) -> list[Path]:
     return paths
 
 
-def build_rag_pipeline(corpus: IndexedCorpus) -> RAGPipeline:
+def build_rag_pipeline(
+    corpus: IndexedCorpus,
+    top_k: int = 3,
+) -> RAGPipeline:
     bm25_retriever = BM25Retriever(corpus.chunks)
 
     dense_retriever = DenseRetriever(
@@ -82,7 +90,7 @@ def build_rag_pipeline(corpus: IndexedCorpus) -> RAGPipeline:
             model="llama3.1:8b",
             temperature=0.1,
         ),
-        top_k=3,
+        top_k=top_k,
     )
 
 

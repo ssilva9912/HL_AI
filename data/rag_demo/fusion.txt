@@ -1,1 +1,1 @@
-Reciprocal Rank Fusion combines ranked results from BM25 and dense retrieval. RRF uses the rank position from each retriever instead of directly comparing incompatible raw similarity scores.
+Homelab AI uses Reciprocal Rank Fusion to combine results from its BM25 and dense retrievers. These retrievers produce different kinds of raw scores that should not be averaged directly. RRF avoids that problem by combining results according to their rank positions rather than comparing their incompatible similarity scores.

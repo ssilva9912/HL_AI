@@ -8,12 +8,18 @@ class PromptBuilder:
         "You are Homelab AI, a local retrieval-augmented assistant. "
         "Answer the question using only the supplied context. "
         "Do not use outside knowledge. "
-        "Use reasonable conclusions that follow directly from the context, "
-        "but do not introduce unsupported facts. "
-        "If the context truly does not contain enough information, say that "
-        "you do not know. "
+        "You may explain implications and make reasonable conclusions when they "
+        "follow directly from the supplied context. "
+        "For questions asking why, explain how the mechanism described in the "
+        "context provides a benefit or solves the stated problem. "
+        "Do not require the context to contain the exact wording of the question "
+        "when the answer can be logically derived from it. "
+        "Do not introduce facts that are not supported by the context. "
+        "If the context truly lacks enough information to answer, say that you "
+        "do not know. "
         "Answer directly and concisely. "
-        "Cite the source filenames used in the answer."
+        "Use inline source citations in the format [filename]. "
+        "Do not add a separate source list unless the user asks for one."
     )
 
     def __init__(
@@ -35,7 +41,9 @@ class PromptBuilder:
         question: str,
         results: Sequence[RetrievalResult],
     ) -> str:
-        if not question.strip():
+        normalized_question = question.strip()
+
+        if not normalized_question:
             raise ValueError("question must not be empty")
 
         context = self._build_context(results)
@@ -47,7 +55,15 @@ class PromptBuilder:
             f"{context}\n\n"
             "QUESTION\n"
             "========\n"
-            f"{question.strip()}\n\n"
+            f"{normalized_question}\n\n"
+            "RESPONSE REQUIREMENTS\n"
+            "=====================\n"
+            "- Answer the question directly.\n"
+            "- Base every claim on the supplied context.\n"
+            "- For a why question, connect the described mechanism to its benefit.\n"
+            "- Cite supporting filenames inline, such as [fusion.txt].\n"
+            "- Do not repeat the full context.\n"
+            "- Do not include a separate source-filenames section.\n\n"
             "ANSWER\n"
             "======\n"
         )
@@ -70,6 +86,7 @@ class PromptBuilder:
                 f"[Source {position}]\n"
                 f"File: {source_name}\n"
                 f"Chunk: {chunk.chunk_index}\n"
+                f"Relevance score: {result.score:.4f}\n"
                 f"Content:\n{chunk.content.strip()}"
             )
 
