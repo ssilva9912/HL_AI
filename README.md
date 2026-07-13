@@ -1,6 +1,6 @@
 # Homelab AI
 
-[![CI](https://github.com/ssilva9912/homelab_ai/actions/workflows/ci.yml/badge.svg)](https://github.com/ssilva9912/homelab_ai/actions/workflows/ci.yml)
+[![CI Pipeline](https://github.com/ssilva9912/HL_AI/actions/workflows/ci.yml/badge.svg)](https://github.com/ssilva9912/HL_AI/actions/workflows/ci.yml)
 
 A modular, fully local Retrieval-Augmented Generation (RAG) platform built in Python.
 
