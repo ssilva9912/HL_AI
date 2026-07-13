@@ -1,0 +1,1 @@
+Reciprocal Rank Fusion combines ranked results from BM25 and dense retrieval. RRF uses the rank position from each retriever instead of directly comparing incompatible raw similarity scores.

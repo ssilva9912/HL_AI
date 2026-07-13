@@ -1,0 +1,1 @@
+A cross-encoder reranker evaluates the question and each retrieved passage together. It reorders candidate passages according to their estimated relevance to the question.
