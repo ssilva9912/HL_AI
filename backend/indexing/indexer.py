@@ -9,11 +9,12 @@ from backend.ingestion.scanner import FileMetadata
 from backend.interfaces.chunker import Chunker, DocumentChunk
 from backend.interfaces.embedder import EmbeddedChunk, EmbeddingProvider
 from backend.interfaces.parser import ParsedDocument, Parser
+from backend.interfaces.vector_store import VectorStore
 from backend.parser.text_parser import TextParser
 from backend.storage.in_memory_vector_store import InMemoryVectorStore
 
 
-class VectorStoreWriter(Protocol):
+class IndexVectorStore(VectorStore, Protocol):
     def add_many(
         self,
         embedded_chunks: list[EmbeddedChunk],
@@ -27,7 +28,7 @@ class IndexedCorpus:
     documents: list[ParsedDocument]
     chunks: list[DocumentChunk]
     embedded_chunks: list[EmbeddedChunk]
-    vector_store: VectorStoreWriter
+    vector_store: IndexVectorStore
     embedder: EmbeddingProvider
 
     @property
@@ -45,7 +46,7 @@ class Indexer:
         parser: Parser | None = None,
         chunker: Chunker | None = None,
         embedder: EmbeddingProvider | None = None,
-        vector_store: VectorStoreWriter | None = None,
+        vector_store: IndexVectorStore | None = None,
     ) -> None:
         self._parser = parser or TextParser()
         self._chunker = chunker or SemanticChunker()
