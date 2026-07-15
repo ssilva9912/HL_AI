@@ -1,6 +1,7 @@
 from functools import lru_cache
 
 from backend.api.rag_service import HomelabRAGService
+from backend.config import get_settings
 
 
 @lru_cache(maxsize=1)
@@ -12,4 +13,6 @@ def get_rag_service() -> HomelabRAGService:
     first search request instead of being recreated for every request.
     """
 
-    return HomelabRAGService()
+    return HomelabRAGService(
+        settings=get_settings(),
+    )

@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from backend.config import Settings, get_settings
 from backend.demo import build_rag_pipeline, create_demo_documents
 from backend.indexing.indexer import IndexedCorpus, Indexer
 
@@ -31,8 +32,10 @@ class HomelabRAGService:
     def __init__(
         self,
         document_directory: Path | None = None,
+        settings: Settings | None = None,
     ) -> None:
-        self._document_directory = document_directory or Path("data/rag_demo")
+        self._settings = settings or get_settings()
+        self._document_directory = document_directory or self._settings.document_directory
         self._corpus: IndexedCorpus | None = None
 
     def _get_corpus(self) -> IndexedCorpus:
@@ -48,18 +51,23 @@ class HomelabRAGService:
     def ask(
         self,
         question: str,
-        top_k: int = 5,
+        top_k: int | None = None,
     ) -> RAGAnswer:
         normalized_question = question.strip()
 
         if not normalized_question:
             raise ValueError("question must not be empty")
 
+        resolved_top_k = top_k if top_k is not None else self._settings.default_top_k
+
+        if resolved_top_k <= 0:
+            raise ValueError("top_k must be positive")
+
         corpus = self._get_corpus()
 
         pipeline = build_rag_pipeline(
             corpus=corpus,
-            top_k=top_k,
+            top_k=resolved_top_k,
         )
 
         result = pipeline.ask(normalized_question)

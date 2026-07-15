@@ -1,4 +1,8 @@
+from functools import lru_cache
 from pathlib import Path
+
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = PROJECT_ROOT / "data"
@@ -11,3 +15,35 @@ EXCLUDED_DIRS = {
     "venv",
     "node_modules",
 }
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=PROJECT_ROOT / ".env",
+        env_file_encoding="utf-8",
+        env_prefix="HOMELAB_",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    api_host: str = Field(default="127.0.0.1")
+    api_port: int = Field(default=8000, ge=1, le=65535)
+    api_url: str = Field(default="http://127.0.0.1:8000")
+
+    ollama_url: str = Field(default="http://localhost:11434")
+    llm_model: str = Field(default="llama3.2")
+    embedding_model: str = Field(default="nomic-embed-text")
+
+    request_timeout: float = Field(default=120.0, gt=0)
+    embedding_timeout: float = Field(default=30.0, gt=0)
+
+    default_top_k: int = Field(default=5, ge=1, le=20)
+
+    document_directory: Path = Field(
+        default=DATA_DIR / "rag_demo",
+    )
+
+
+@lru_cache(maxsize=1)
+def get_settings() -> Settings:
+    return Settings()

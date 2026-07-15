@@ -2,6 +2,7 @@ from typing import Any
 
 import httpx
 
+from backend.config import get_settings
 from backend.interfaces.chunker import DocumentChunk
 from backend.interfaces.embedder import EmbeddedChunk
 
@@ -9,22 +10,28 @@ from backend.interfaces.embedder import EmbeddedChunk
 class OllamaEmbedder:
     def __init__(
         self,
-        model: str = "nomic-embed-text",
-        base_url: str = "http://localhost:11434",
-        timeout: float = 30.0,
+        model: str | None = None,
+        base_url: str | None = None,
+        timeout: float | None = None,
     ) -> None:
-        if not model.strip():
+        settings = get_settings()
+
+        resolved_model = model or settings.embedding_model
+        resolved_base_url = base_url or settings.ollama_url
+        resolved_timeout = timeout if timeout is not None else settings.embedding_timeout
+
+        if not resolved_model.strip():
             raise ValueError("model must not be empty")
 
-        if not base_url.strip():
+        if not resolved_base_url.strip():
             raise ValueError("base_url must not be empty")
 
-        if timeout <= 0:
+        if resolved_timeout <= 0:
             raise ValueError("timeout must be positive")
 
-        self._model = model
-        self._base_url = base_url.rstrip("/")
-        self._timeout = timeout
+        self._model = resolved_model.strip()
+        self._base_url = resolved_base_url.rstrip("/")
+        self._timeout = resolved_timeout
 
     def embed_text(self, text: str) -> list[float]:
         if not text.strip():
@@ -38,6 +45,7 @@ class OllamaEmbedder:
             },
             timeout=self._timeout,
         )
+
         response.raise_for_status()
 
         return self._parse_embedding(response.json())

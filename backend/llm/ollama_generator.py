@@ -3,37 +3,42 @@ from typing import Any
 
 import httpx
 
+from backend.config import get_settings
+
 JsonResponse = dict[str, Any]
 PostFunction = Callable[..., httpx.Response]
 
 
 class OllamaGenerator:
-    DEFAULT_MODEL = "llama3.2"
-    DEFAULT_BASE_URL = "http://localhost:11434"
-
     def __init__(
         self,
-        model: str = DEFAULT_MODEL,
-        base_url: str = DEFAULT_BASE_URL,
-        timeout_seconds: float = 120.0,
+        model: str | None = None,
+        base_url: str | None = None,
+        timeout_seconds: float | None = None,
         temperature: float = 0.1,
         post_function: PostFunction | None = None,
     ) -> None:
-        if not model.strip():
+        settings = get_settings()
+
+        resolved_model = settings.llm_model if model is None else model
+        resolved_base_url = settings.ollama_url if base_url is None else base_url
+        resolved_timeout = settings.request_timeout if timeout_seconds is None else timeout_seconds
+
+        if not resolved_model.strip():
             raise ValueError("model must not be empty")
 
-        if not base_url.strip():
+        if not resolved_base_url.strip():
             raise ValueError("base_url must not be empty")
 
-        if timeout_seconds <= 0:
+        if resolved_timeout <= 0:
             raise ValueError("timeout_seconds must be positive")
 
         if temperature < 0:
             raise ValueError("temperature cannot be negative")
 
-        self._model = model.strip()
-        self._base_url = base_url.rstrip("/")
-        self._timeout_seconds = timeout_seconds
+        self._model = resolved_model.strip()
+        self._base_url = resolved_base_url.strip().rstrip("/")
+        self._timeout_seconds = resolved_timeout
         self._temperature = temperature
         self._post_function = post_function or httpx.post
 
