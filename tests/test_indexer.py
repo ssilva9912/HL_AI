@@ -344,3 +344,54 @@ def test_empty_directory_raises_value_error(
         match="directory contains no files",
     ):
         indexer.index_directory(tmp_path)
+
+
+def test_default_indexer_supports_text_and_markdown(
+    tmp_path: Path,
+) -> None:
+    text_path = tmp_path / "notes.txt"
+    markdown_path = tmp_path / "guide.md"
+
+    text_path.write_text(
+        "Plain text document.",
+        encoding="utf-8",
+    )
+    markdown_path.write_text(
+        "# Markdown document",
+        encoding="utf-8",
+    )
+
+    embedder = FakeEmbedder()
+    vector_store = FakeVectorStore()
+
+    indexer = Indexer(
+        chunker=FakeChunker(),
+        embedder=embedder,
+        vector_store=vector_store,
+    )
+
+    corpus = indexer.index_paths(
+        [
+            text_path,
+            markdown_path,
+        ]
+    )
+
+    assert corpus.document_count == 2
+    assert corpus.chunk_count == 2
+
+    indexed_types = {document.file_type for document in corpus.documents}
+
+    assert indexed_types == {
+        "text",
+        "markdown",
+    }
+
+    indexed_names = {document.metadata.name for document in corpus.documents}
+
+    assert indexed_names == {
+        "notes.txt",
+        "guide.md",
+    }
+
+    assert vector_store.count() == 2

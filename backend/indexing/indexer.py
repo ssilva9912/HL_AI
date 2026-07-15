@@ -10,6 +10,8 @@ from backend.interfaces.chunker import Chunker, DocumentChunk
 from backend.interfaces.embedder import EmbeddedChunk, EmbeddingProvider
 from backend.interfaces.parser import ParsedDocument, Parser
 from backend.interfaces.vector_store import VectorStore
+from backend.parser.markdown_parser import MarkdownParser
+from backend.parser.registry import ParserRegistry
 from backend.parser.text_parser import TextParser
 from backend.storage.in_memory_vector_store import InMemoryVectorStore
 
@@ -48,7 +50,12 @@ class Indexer:
         embedder: EmbeddingProvider | None = None,
         vector_store: IndexVectorStore | None = None,
     ) -> None:
-        self._parser = parser or TextParser()
+        self._parser = parser or ParserRegistry(
+            parsers=[
+                TextParser(),
+                MarkdownParser(),
+            ]
+        )
         self._chunker = chunker or SemanticChunker()
         self._embedder = embedder or OllamaEmbedder()
         self._vector_store = vector_store or InMemoryVectorStore()
