@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     embedding_timeout: float = Field(default=30.0, gt=0)
 
     default_top_k: int = Field(default=5, ge=1, le=20)
+    max_upload_bytes: int = Field(
+        default=10 * 1024 * 1024,
+        gt=0,
+        description="Maximum accepted document upload size in bytes.",
+    )
 
     document_directory: Path = Field(
         default=DATA_DIR / "rag_demo",

@@ -34,6 +34,14 @@ class SearchResponse(BaseModel):
     metadata: SearchMetadata
 
 
+class IngestResponse(BaseModel):
+    document: str
+    size_bytes: int
+    document_count: int
+    chunk_count: int
+    status: str
+
+
 class HealthResponse(BaseModel):
     status: str
     service: str

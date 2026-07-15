@@ -2,12 +2,26 @@ import logging
 from time import perf_counter
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    UploadFile,
+    status,
+)
 
 from backend.api.dependencies import get_rag_service
-from backend.api.rag_service import HomelabRAGService
+from backend.api.rag_service import (
+    DocumentTooLargeError,
+    EmptyDocumentError,
+    HomelabRAGService,
+    InvalidDocumentNameError,
+    UnsupportedDocumentTypeError,
+)
 from backend.api.schemas import (
     HealthResponse,
+    IngestResponse,
     SearchMetadata,
     SearchRequest,
     SearchResponse,
@@ -102,4 +116,83 @@ def search(
             source_count=len(sources),
             elapsed_ms=round(elapsed_ms, 2),
         ),
+    )
+
+
+@router.post(
+    "/ingest",
+    response_model=IngestResponse,
+    tags=["documents"],
+    status_code=status.HTTP_201_CREATED,
+)
+def ingest(
+    file: Annotated[
+        UploadFile,
+        File(description=("Text, Markdown, or text-based PDF document.")),
+    ],
+    rag_service: Annotated[
+        HomelabRAGService,
+        Depends(get_rag_service),
+    ],
+) -> IngestResponse:
+    filename = file.filename or ""
+
+    try:
+        content = file.file.read(rag_service.max_upload_bytes + 1)
+
+        result = rag_service.ingest_document(
+            filename=filename,
+            content=content,
+        )
+    except InvalidDocumentNameError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+    except UnsupportedDocumentTypeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail=str(exc),
+        ) from exc
+    except EmptyDocumentError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+    except DocumentTooLargeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail=str(exc),
+        ) from exc
+    except ValueError as exc:
+        logger.exception("Document could not be parsed")
+
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+    except Exception as exc:
+        logger.exception("Unexpected document ingestion error")
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="The document could not be ingested.",
+        ) from exc
+    finally:
+        file.file.close()
+
+    logger.info(
+        "Document ingested document=%s size_bytes=%d document_count=%d chunk_count=%d",
+        result.document,
+        result.size_bytes,
+        result.document_count,
+        result.chunk_count,
+    )
+
+    return IngestResponse(
+        document=result.document,
+        size_bytes=result.size_bytes,
+        document_count=result.document_count,
+        chunk_count=result.chunk_count,
+        status=result.status,
     )

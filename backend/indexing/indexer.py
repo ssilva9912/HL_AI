@@ -11,6 +11,7 @@ from backend.interfaces.embedder import EmbeddedChunk, EmbeddingProvider
 from backend.interfaces.parser import ParsedDocument, Parser
 from backend.interfaces.vector_store import VectorStore
 from backend.parser.markdown_parser import MarkdownParser
+from backend.parser.pdf_parser import PdfParser
 from backend.parser.registry import ParserRegistry
 from backend.parser.text_parser import TextParser
 from backend.storage.in_memory_vector_store import InMemoryVectorStore
@@ -54,6 +55,7 @@ class Indexer:
             parsers=[
                 TextParser(),
                 MarkdownParser(),
+                PdfParser(),
             ]
         )
         self._chunker = chunker or SemanticChunker()

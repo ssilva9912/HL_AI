@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -5,6 +6,30 @@ from typing import Any
 from backend.config import Settings, get_settings
 from backend.demo import build_rag_pipeline, create_demo_documents
 from backend.indexing.indexer import IndexedCorpus, Indexer
+
+SUPPORTED_DOCUMENT_EXTENSIONS = {
+    ".txt",
+    ".md",
+    ".pdf",
+}
+
+IndexerFactory = Callable[[], Indexer]
+
+
+class InvalidDocumentNameError(ValueError):
+    pass
+
+
+class UnsupportedDocumentTypeError(ValueError):
+    pass
+
+
+class EmptyDocumentError(ValueError):
+    pass
+
+
+class DocumentTooLargeError(ValueError):
+    pass
 
 
 @dataclass(frozen=True)
@@ -21,30 +46,59 @@ class RAGAnswer:
     sources: list[RAGSource]
 
 
+@dataclass(frozen=True)
+class IngestionResult:
+    document: str
+    size_bytes: int
+    document_count: int
+    chunk_count: int
+    status: str = "indexed"
+
+
 class HomelabRAGService:
     """
-    API-facing adapter for the existing Homelab AI RAG pipeline.
+    API-facing adapter for the Homelab AI RAG pipeline.
 
-    The corpus is indexed once and reused across requests.
-    The pipeline is rebuilt per request so each request can use its own top_k.
+    The corpus is indexed lazily and reused across search requests. Uploading
+    a document rebuilds the current in-memory corpus so the new file becomes
+    searchable immediately.
     """
 
     def __init__(
         self,
         document_directory: Path | None = None,
         settings: Settings | None = None,
+        indexer_factory: IndexerFactory | None = None,
     ) -> None:
         self._settings = settings or get_settings()
         self._document_directory = document_directory or self._settings.document_directory
+        self._indexer_factory = indexer_factory or Indexer
         self._corpus: IndexedCorpus | None = None
+
+    @property
+    def max_upload_bytes(self) -> int:
+        return self._settings.max_upload_bytes
+
+    def _prepare_document_directory(self) -> None:
+        self._document_directory.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        if not any(self._document_directory.iterdir()):
+            create_demo_documents(self._document_directory)
+
+    def _rebuild_corpus(self) -> IndexedCorpus:
+        self._prepare_document_directory()
+
+        indexer = self._indexer_factory()
+        self._corpus = indexer.index_directory(self._document_directory)
+
+        return self._corpus
 
     def _get_corpus(self) -> IndexedCorpus:
         if self._corpus is None:
-            create_demo_documents(self._document_directory)
-
-            indexer = Indexer()
-
-            self._corpus = indexer.index_directory(self._document_directory)
+            return self._rebuild_corpus()
 
         return self._corpus
 
@@ -75,6 +129,62 @@ class HomelabRAGService:
         return RAGAnswer(
             answer=result.answer,
             sources=[self._normalize_source(source) for source in result.sources],
+        )
+
+    def ingest_document(
+        self,
+        filename: str,
+        content: bytes,
+    ) -> IngestionResult:
+        normalized_filename = filename.strip()
+
+        if not normalized_filename or "/" in normalized_filename or "\\" in normalized_filename:
+            raise InvalidDocumentNameError(
+                "A valid filename without directory components is required."
+            )
+
+        extension = Path(normalized_filename).suffix.lower()
+
+        if extension not in SUPPORTED_DOCUMENT_EXTENSIONS:
+            supported = ", ".join(sorted(SUPPORTED_DOCUMENT_EXTENSIONS))
+            raise UnsupportedDocumentTypeError(
+                f"Unsupported document type: {extension or '<none>'}. "
+                f"Supported extensions: {supported}."
+            )
+
+        if not content:
+            raise EmptyDocumentError("Uploaded document cannot be empty.")
+
+        if len(content) > self.max_upload_bytes:
+            raise DocumentTooLargeError("Uploaded document exceeds the configured size limit.")
+
+        self._document_directory.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        destination = self._document_directory / normalized_filename
+        previous_content = destination.read_bytes() if destination.exists() else None
+
+        destination.write_bytes(content)
+        self._corpus = None
+
+        try:
+            corpus = self._rebuild_corpus()
+        except Exception:
+            if previous_content is None:
+                destination.unlink(missing_ok=True)
+            else:
+                destination.write_bytes(previous_content)
+
+            self._corpus = None
+            raise
+
+        return IngestionResult(
+            document=normalized_filename,
+            size_bytes=len(content),
+            document_count=corpus.document_count,
+            chunk_count=corpus.chunk_count,
         )
 
     @staticmethod
