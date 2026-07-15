@@ -52,10 +52,36 @@ def test_search() -> None:
 
     body = response.json()
 
-    assert body["answer"]
+    assert body["answer"] == ("Test answer for: What is contained in the knowledge base?")
+
     assert len(body["sources"]) == 1
-    assert body["sources"][0]["document"] == "sample.txt"
-    assert body["sources"][0]["score"] == 0.95
+    assert body["sources"][0] == {
+        "text": "Example source content.",
+        "score": 0.95,
+        "document": "sample.txt",
+        "chunk_id": "chunk-1",
+    }
+
+    assert body["metadata"]["top_k"] == 5
+    assert body["metadata"]["source_count"] == 1
+    assert body["metadata"]["elapsed_ms"] >= 0
+
+
+def test_search_uses_requested_top_k() -> None:
+    response = client.post(
+        "/search",
+        json={
+            "question": "Test question",
+            "top_k": 1,
+        },
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert body["metadata"]["top_k"] == 1
+    assert body["metadata"]["source_count"] == 1
 
 
 def test_search_rejects_empty_question() -> None:
@@ -67,6 +93,20 @@ def test_search_rejects_empty_question() -> None:
     )
 
     assert response.status_code == 422
+
+
+def test_search_rejects_whitespace_only_question() -> None:
+    response = client.post(
+        "/search",
+        json={
+            "question": "   ",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "detail": "Question cannot be empty.",
+    }
 
 
 def test_search_rejects_excessive_top_k() -> None:

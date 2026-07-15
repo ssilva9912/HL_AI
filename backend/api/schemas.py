@@ -22,9 +22,16 @@ class SourceResponse(BaseModel):
     chunk_id: str | None = None
 
 
+class SearchMetadata(BaseModel):
+    top_k: int
+    source_count: int
+    elapsed_ms: float
+
+
 class SearchResponse(BaseModel):
     answer: str
     sources: list[SourceResponse]
+    metadata: SearchMetadata
 
 
 class HealthResponse(BaseModel):

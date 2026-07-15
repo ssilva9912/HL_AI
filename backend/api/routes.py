@@ -1,4 +1,5 @@
 import logging
+from time import perf_counter
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -7,6 +8,7 @@ from backend.api.dependencies import get_rag_service
 from backend.api.rag_service import HomelabRAGService
 from backend.api.schemas import (
     HealthResponse,
+    SearchMetadata,
     SearchRequest,
     SearchResponse,
     SourceResponse,
@@ -46,9 +48,11 @@ def search(
 
     if not question:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Question cannot be empty.",
         )
+
+    started_at = perf_counter()
 
     try:
         result = rag_service.ask(
@@ -70,15 +74,32 @@ def search(
             detail="The question could not be processed.",
         ) from exc
 
+    elapsed_ms = (perf_counter() - started_at) * 1_000
+
+    sources = [
+        SourceResponse(
+            text=source.text,
+            score=source.score,
+            document=source.document,
+            chunk_id=source.chunk_id,
+        )
+        for source in result.sources
+    ]
+
+    logger.info(
+        "RAG search completed question_length=%d top_k=%d source_count=%d elapsed_ms=%.2f",
+        len(question),
+        request.top_k,
+        len(sources),
+        elapsed_ms,
+    )
+
     return SearchResponse(
         answer=result.answer,
-        sources=[
-            SourceResponse(
-                text=source.text,
-                score=source.score,
-                document=source.document,
-                chunk_id=source.chunk_id,
-            )
-            for source in result.sources
-        ],
+        sources=sources,
+        metadata=SearchMetadata(
+            top_k=request.top_k,
+            source_count=len(sources),
+            elapsed_ms=round(elapsed_ms, 2),
+        ),
     )
