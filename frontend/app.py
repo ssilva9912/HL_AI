@@ -2,6 +2,7 @@ from typing import Any
 
 import streamlit as st
 from api import (
+    EvaluationResult,
     HomelabAPIClient,
     HomelabAPIError,
     SearchResult,
@@ -20,12 +21,17 @@ def initialize_session_state() -> None:
     if "backend_status" not in st.session_state:
         st.session_state.backend_status = None
 
+    if "evaluation_result" not in st.session_state:
+        st.session_state.evaluation_result = None
+
 
 def get_api_client() -> HomelabAPIClient:
     return HomelabAPIClient()
 
 
-def check_backend(client: HomelabAPIClient) -> None:
+def check_backend(
+    client: HomelabAPIClient,
+) -> None:
     try:
         health = client.health()
     except HomelabAPIError:
@@ -81,9 +87,15 @@ def display_sources(
                 "document",
                 "Unknown document",
             )
-            chunk_id = source.get("chunk_id", "")
+            chunk_id = source.get(
+                "chunk_id",
+                "",
+            )
             score = float(source.get("score", 0.0))
-            text = source.get("text", "")
+            text = source.get(
+                "text",
+                "",
+            )
 
             st.markdown(f"**{index}. {document}**")
 
@@ -174,23 +186,11 @@ def render_sidebar(
     return int(top_k)
 
 
-def main() -> None:
-    st.set_page_config(
-        page_title="Homelab AI",
-        page_icon="🏠",
-        layout="centered",
-    )
-
-    initialize_session_state()
-
-    client = get_api_client()
-
-    if st.session_state.backend_status is None:
-        check_backend(client)
-
-    top_k = render_sidebar(client)
-
-    st.title("Homelab AI")
+def render_chat_tab(
+    client: HomelabAPIClient,
+    top_k: int,
+) -> None:
+    st.subheader("Document chat")
     st.caption("Ask questions about documents indexed by your local RAG system.")
 
     display_chat_history()
@@ -252,6 +252,156 @@ def main() -> None:
             role="assistant",
             content=result.answer,
             sources=serialized_sources,
+        )
+
+
+def render_evaluation_tab(
+    client: HomelabAPIClient,
+) -> None:
+    st.subheader("Retrieval evaluation")
+    st.caption("Run the sample benchmark against the currently indexed corpus.")
+
+    evaluation_top_k = st.slider(
+        label="Evaluation retrieval depth",
+        min_value=1,
+        max_value=20,
+        value=5,
+        step=1,
+        key="evaluation_top_k",
+        help=("Maximum number of retrieved documents evaluated for each benchmark question."),
+    )
+
+    if st.button(
+        "Run evaluation",
+        type="primary",
+        use_container_width=True,
+    ):
+        with st.spinner("Running retrieval benchmark..."):
+            try:
+                result = client.evaluate(
+                    top_k=int(evaluation_top_k),
+                )
+            except ValueError as exc:
+                st.warning(str(exc))
+            except HomelabAPIError as exc:
+                st.error(f"Evaluation failed: {exc}")
+                st.session_state.backend_status = None
+            else:
+                st.session_state.evaluation_result = result
+
+    evaluation_result = st.session_state.evaluation_result
+
+    if evaluation_result is None:
+        st.info("Run the benchmark to calculate retrieval metrics.")
+        return
+
+    display_evaluation_result(evaluation_result)
+
+
+def display_evaluation_result(
+    result: EvaluationResult,
+) -> None:
+    metrics = result.metrics
+
+    st.divider()
+
+    first_row = st.columns(3)
+
+    first_row[0].metric(
+        "Hit@1",
+        f"{metrics.hit_at_1:.1%}",
+    )
+    first_row[1].metric(
+        "Hit@5",
+        f"{metrics.hit_at_5:.1%}",
+    )
+    first_row[2].metric(
+        "MRR",
+        f"{metrics.mean_reciprocal_rank:.3f}",
+    )
+
+    second_row = st.columns(3)
+
+    second_row[0].metric(
+        "Precision@5",
+        f"{metrics.precision_at_5:.1%}",
+    )
+    second_row[1].metric(
+        "Recall@5",
+        f"{metrics.recall_at_5:.1%}",
+    )
+    second_row[2].metric(
+        "Questions",
+        str(metrics.question_count),
+    )
+
+    st.caption(f"Top K: `{result.top_k}` · Elapsed time: `{result.elapsed_ms:.2f} ms`")
+
+    st.divider()
+    st.markdown("### Per-question results")
+
+    rows = [
+        {
+            "Question": question.question,
+            "Relevant documents": ", ".join(question.relevant_documents),
+            "Retrieved documents": ", ".join(question.retrieved_documents),
+            "Hit@1": question.hit_at_1,
+            "Hit@5": question.hit_at_5,
+            "Precision@5": question.precision_at_5,
+            "Recall@5": question.recall_at_5,
+            "Reciprocal rank": (question.reciprocal_rank),
+        }
+        for question in result.questions
+    ]
+
+    st.dataframe(
+        rows,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Hit@1": st.column_config.NumberColumn(format="%.2f"),
+            "Hit@5": st.column_config.NumberColumn(format="%.2f"),
+            "Precision@5": (st.column_config.NumberColumn(format="%.2f")),
+            "Recall@5": (st.column_config.NumberColumn(format="%.2f")),
+            "Reciprocal rank": (st.column_config.NumberColumn(format="%.3f")),
+        },
+    )
+
+
+def main() -> None:
+    st.set_page_config(
+        page_title="Homelab AI",
+        page_icon="🏠",
+        layout="wide",
+    )
+
+    initialize_session_state()
+
+    client = get_api_client()
+
+    if st.session_state.backend_status is None:
+        check_backend(client)
+
+    top_k = render_sidebar(client)
+
+    st.title("Homelab AI")
+
+    chat_tab, evaluation_tab = st.tabs(
+        [
+            "Chat",
+            "Evaluation",
+        ]
+    )
+
+    with chat_tab:
+        render_chat_tab(
+            client=client,
+            top_k=top_k,
+        )
+
+    with evaluation_tab:
+        render_evaluation_tab(
+            client=client,
         )
 
 

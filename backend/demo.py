@@ -1,6 +1,7 @@
 from pathlib import Path
 
-from backend.indexing.indexer import IndexedCorpus, Indexer
+from backend.indexing.indexer import Indexer
+from backend.indexing.models import IndexedCorpus
 from backend.llm.ollama_generator import OllamaGenerator
 from backend.rag.pipeline import RAGPipeline
 from backend.rag.prompt_builder import PromptBuilder

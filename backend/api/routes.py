@@ -20,8 +20,12 @@ from backend.api.rag_service import (
     UnsupportedDocumentTypeError,
 )
 from backend.api.schemas import (
+    EvaluationMetricsResponse,
+    EvaluationRequest,
+    EvaluationResponse,
     HealthResponse,
     IngestResponse,
+    QuestionEvaluationResponse,
     SearchMetadata,
     SearchRequest,
     SearchResponse,
@@ -116,6 +120,90 @@ def search(
             source_count=len(sources),
             elapsed_ms=round(elapsed_ms, 2),
         ),
+    )
+
+
+@router.post(
+    "/evaluate",
+    response_model=EvaluationResponse,
+    tags=["evaluation"],
+    status_code=status.HTTP_200_OK,
+)
+def evaluate(
+    request: EvaluationRequest,
+    rag_service: Annotated[
+        HomelabRAGService,
+        Depends(get_rag_service),
+    ],
+) -> EvaluationResponse:
+    started_at = perf_counter()
+
+    try:
+        report = rag_service.evaluate(
+            top_k=request.top_k,
+        )
+    except FileNotFoundError as exc:
+        logger.exception("Evaluation dataset was not found")
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        ) from exc
+    except ValueError as exc:
+        logger.exception("Evaluation configuration is invalid")
+
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+    except RuntimeError as exc:
+        logger.exception("Evaluation pipeline configuration error")
+
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+    except Exception as exc:
+        logger.exception("Unexpected error while running retrieval evaluation")
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="The retrieval evaluation could not be completed.",
+        ) from exc
+
+    elapsed_ms = (perf_counter() - started_at) * 1_000
+
+    logger.info(
+        "Retrieval evaluation completed question_count=%d top_k=%d elapsed_ms=%.2f",
+        report.metrics.question_count,
+        request.top_k,
+        elapsed_ms,
+    )
+
+    return EvaluationResponse(
+        metrics=EvaluationMetricsResponse(
+            question_count=report.metrics.question_count,
+            hit_at_1=report.metrics.hit_at_1,
+            hit_at_5=report.metrics.hit_at_5,
+            precision_at_5=report.metrics.precision_at_5,
+            recall_at_5=report.metrics.recall_at_5,
+            mean_reciprocal_rank=(report.metrics.mean_reciprocal_rank),
+        ),
+        questions=[
+            QuestionEvaluationResponse(
+                question=result.question,
+                relevant_documents=list(result.relevant_documents),
+                retrieved_documents=list(result.retrieved_documents),
+                hit_at_1=result.hit_at_1,
+                hit_at_5=result.hit_at_5,
+                precision_at_5=result.precision_at_5,
+                recall_at_5=result.recall_at_5,
+                reciprocal_rank=result.reciprocal_rank,
+            )
+            for result in report.questions
+        ],
+        top_k=request.top_k,
+        elapsed_ms=round(elapsed_ms, 2),
     )
 
 

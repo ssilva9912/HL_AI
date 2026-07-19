@@ -1,17 +1,22 @@
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from backend.config import Settings, get_settings
 from backend.demo import build_rag_pipeline, create_demo_documents
-from backend.indexing.indexer import IndexedCorpus, Indexer
+from backend.indexing.indexer import Indexer
+from backend.indexing.models import IndexedCorpus
+from evaluation.dataset import load_evaluation_dataset
+from evaluation.evaluator import EvaluationReport, evaluate_retriever
 
 SUPPORTED_DOCUMENT_EXTENSIONS = {
     ".txt",
     ".md",
     ".pdf",
 }
+
+DEFAULT_EVALUATION_DATASET = Path("evaluation/sample_questions.json")
 
 IndexerFactory = Callable[[], Indexer]
 
@@ -69,10 +74,12 @@ class HomelabRAGService:
         document_directory: Path | None = None,
         settings: Settings | None = None,
         indexer_factory: IndexerFactory | None = None,
+        evaluation_dataset_path: Path | None = None,
     ) -> None:
         self._settings = settings or get_settings()
         self._document_directory = document_directory or self._settings.document_directory
         self._indexer_factory = indexer_factory or Indexer
+        self._evaluation_dataset_path = evaluation_dataset_path or DEFAULT_EVALUATION_DATASET
         self._corpus: IndexedCorpus | None = None
 
     @property
@@ -130,6 +137,33 @@ class HomelabRAGService:
             answer=result.answer,
             sources=[self._normalize_source(source) for source in result.sources],
         )
+
+    def evaluate(
+        self,
+        top_k: int = 5,
+    ) -> EvaluationReport:
+        if top_k <= 0:
+            raise ValueError("top_k must be positive")
+
+        questions = load_evaluation_dataset(self._evaluation_dataset_path)
+
+        return evaluate_retriever(
+            questions=questions,
+            retrieve_documents=self._retrieve_document_names,
+            top_k=top_k,
+        )
+
+    def _retrieve_document_names(
+        self,
+        question: str,
+        top_k: int,
+    ) -> Sequence[str]:
+        answer = self.ask(
+            question=question,
+            top_k=top_k,
+        )
+
+        return [source.document for source in answer.sources if source.document is not None]
 
     def ingest_document(
         self,
@@ -207,7 +241,11 @@ class HomelabRAGService:
             )
 
             if metadata is not None:
-                name = getattr(metadata, "name", None)
+                name = getattr(
+                    metadata,
+                    "name",
+                    None,
+                )
 
                 if name is not None:
                     document_name = str(name)

@@ -68,6 +68,36 @@ class SearchResult:
     sources: list[Source]
 
 
+@dataclass(frozen=True)
+class EvaluationMetrics:
+    question_count: int
+    hit_at_1: float
+    hit_at_5: float
+    precision_at_5: float
+    recall_at_5: float
+    mean_reciprocal_rank: float
+
+
+@dataclass(frozen=True)
+class QuestionEvaluation:
+    question: str
+    relevant_documents: list[str]
+    retrieved_documents: list[str]
+    hit_at_1: float
+    hit_at_5: float
+    precision_at_5: float
+    recall_at_5: float
+    reciprocal_rank: float
+
+
+@dataclass(frozen=True)
+class EvaluationResult:
+    metrics: EvaluationMetrics
+    questions: list[QuestionEvaluation]
+    top_k: int
+    elapsed_ms: float
+
+
 class HomelabAPIClient:
     def __init__(
         self,
@@ -141,6 +171,97 @@ class HomelabAPIClient:
             sources=sources,
         )
 
+    def evaluate(
+        self,
+        top_k: int = 5,
+    ) -> EvaluationResult:
+        if not 1 <= top_k <= 20:
+            raise ValueError("top_k must be between 1 and 20.")
+
+        response = self._request(
+            method="POST",
+            path="/evaluate",
+            json={
+                "top_k": top_k,
+            },
+        )
+
+        raw_metrics = response.get("metrics")
+        raw_questions = response.get("questions", [])
+
+        if not isinstance(raw_metrics, dict):
+            raise HomelabAPIError("The backend returned invalid evaluation metrics.")
+
+        if not isinstance(raw_questions, list):
+            raise HomelabAPIError("The backend returned invalid question results.")
+
+        metrics = EvaluationMetrics(
+            question_count=int(raw_metrics.get("question_count", 0)),
+            hit_at_1=float(raw_metrics.get("hit_at_1", 0.0)),
+            hit_at_5=float(raw_metrics.get("hit_at_5", 0.0)),
+            precision_at_5=float(raw_metrics.get("precision_at_5", 0.0)),
+            recall_at_5=float(raw_metrics.get("recall_at_5", 0.0)),
+            mean_reciprocal_rank=float(
+                raw_metrics.get(
+                    "mean_reciprocal_rank",
+                    0.0,
+                )
+            ),
+        )
+
+        questions = [
+            self._parse_question_evaluation(question)
+            for question in raw_questions
+            if isinstance(question, dict)
+        ]
+
+        return EvaluationResult(
+            metrics=metrics,
+            questions=questions,
+            top_k=int(response.get("top_k", top_k)),
+            elapsed_ms=float(response.get("elapsed_ms", 0.0)),
+        )
+
+    @staticmethod
+    def _parse_question_evaluation(
+        raw_question: dict[str, Any],
+    ) -> QuestionEvaluation:
+        relevant_documents = raw_question.get(
+            "relevant_documents",
+            [],
+        )
+        retrieved_documents = raw_question.get(
+            "retrieved_documents",
+            [],
+        )
+
+        if not isinstance(relevant_documents, list):
+            relevant_documents = []
+
+        if not isinstance(retrieved_documents, list):
+            retrieved_documents = []
+
+        return QuestionEvaluation(
+            question=str(raw_question.get("question", "")),
+            relevant_documents=[str(document) for document in relevant_documents],
+            retrieved_documents=[str(document) for document in retrieved_documents],
+            hit_at_1=float(raw_question.get("hit_at_1", 0.0)),
+            hit_at_5=float(raw_question.get("hit_at_5", 0.0)),
+            precision_at_5=float(
+                raw_question.get(
+                    "precision_at_5",
+                    0.0,
+                )
+            ),
+            recall_at_5=float(raw_question.get("recall_at_5", 0.0)),
+            reciprocal_rank=float(
+                raw_question.get(
+                    "reciprocal_rank",
+                    0.0,
+                )
+            ),
+        )
+
     def _request(
         self,
         method: str,
@@ -165,7 +286,7 @@ class HomelabAPIClient:
 
         except httpx.TimeoutException as exc:
             raise HomelabAPIError(
-                "The backend request timed out while processing the question."
+                "The backend request timed out while processing the request."
             ) from exc
 
         except httpx.HTTPStatusError as exc:

@@ -1,0 +1,33 @@
+[
+  {
+    "question": "Why does Homelab AI use Reciprocal Rank Fusion?",
+    "relevant_documents": [
+      "fusion.txt"
+    ]
+  },
+  {
+    "question": "What is BM25 useful for?",
+    "relevant_documents": [
+      "bm25.txt"
+    ]
+  },
+  {
+    "question": "How does dense retrieval work?",
+    "relevant_documents": [
+      "dense.txt"
+    ]
+  },
+  {
+    "question": "What happens during cross-encoder reranking?",
+    "relevant_documents": [
+      "reranking.txt"
+    ]
+  },
+  {
+    "question": "What retrieval architecture does Homelab AI use?",
+    "relevant_documents": [
+      "architecture.txt",
+      "fusion.txt"
+    ]
+  }
+]

@@ -34,6 +34,42 @@ class SearchResponse(BaseModel):
     metadata: SearchMetadata
 
 
+class EvaluationRequest(BaseModel):
+    top_k: int = Field(
+        default=5,
+        ge=1,
+        le=20,
+        description="Maximum number of documents retrieved for each benchmark question.",
+    )
+
+
+class EvaluationMetricsResponse(BaseModel):
+    question_count: int
+    hit_at_1: float
+    hit_at_5: float
+    precision_at_5: float
+    recall_at_5: float
+    mean_reciprocal_rank: float
+
+
+class QuestionEvaluationResponse(BaseModel):
+    question: str
+    relevant_documents: list[str]
+    retrieved_documents: list[str]
+    hit_at_1: float
+    hit_at_5: float
+    precision_at_5: float
+    recall_at_5: float
+    reciprocal_rank: float
+
+
+class EvaluationResponse(BaseModel):
+    metrics: EvaluationMetricsResponse
+    questions: list[QuestionEvaluationResponse]
+    top_k: int
+    elapsed_ms: float
+
+
 class IngestResponse(BaseModel):
     document: str
     size_bytes: int
