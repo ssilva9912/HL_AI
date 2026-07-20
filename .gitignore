@@ -74,3 +74,6 @@ dist/
 *.db
 *.sqlite
 *.sqlite3
+data/index/
+data/documents/
+hlai-current.txt

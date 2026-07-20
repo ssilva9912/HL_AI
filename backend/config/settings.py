@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     embedding_timeout: float = Field(default=30.0, gt=0)
 
     default_top_k: int = Field(default=5, ge=1, le=20)
+
     max_upload_bytes: int = Field(
         default=10 * 1024 * 1024,
         gt=0,
@@ -45,7 +46,18 @@ class Settings(BaseSettings):
     )
 
     document_directory: Path = Field(
-        default=DATA_DIR / "rag_demo",
+        default=DATA_DIR / "documents",
+    )
+
+    vector_store_path: Path = Field(
+        default=DATA_DIR / "index" / "qdrant",
+        description="Directory containing the persistent local Qdrant database.",
+    )
+
+    vector_collection_name: str = Field(
+        default="homelab_documents",
+        min_length=1,
+        description="Qdrant collection containing document chunk embeddings.",
     )
 
 

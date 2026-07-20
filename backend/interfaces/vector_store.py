@@ -15,4 +15,8 @@ class VectorStore(Protocol):
 
     def add_many(self, embedded_chunks: list[EmbeddedChunk]) -> None: ...
 
-    def search(self, query_vector: list[float], top_k: int = 5) -> list[SearchResult]: ...
+    def search(
+        self,
+        query_vector: list[float],
+        top_k: int = 5,
+    ) -> list[SearchResult]: ...

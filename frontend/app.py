@@ -6,6 +6,7 @@ from api import (
     HomelabAPIClient,
     HomelabAPIError,
     SearchResult,
+    UploadResult,
     get_api_url,
     get_default_top_k,
 )
@@ -23,6 +24,9 @@ def initialize_session_state() -> None:
 
     if "evaluation_result" not in st.session_state:
         st.session_state.evaluation_result = None
+
+    if "upload_results" not in st.session_state:
+        st.session_state.upload_results = []
 
 
 def get_api_client() -> HomelabAPIClient:
@@ -91,7 +95,12 @@ def display_sources(
                 "chunk_id",
                 "",
             )
-            score = float(source.get("score", 0.0))
+            score = float(
+                source.get(
+                    "score",
+                    0.0,
+                )
+            )
             text = source.get(
                 "text",
                 "",
@@ -163,6 +172,7 @@ def render_sidebar(
                 "service",
                 "homelab-ai",
             )
+
             st.success("Backend online")
             st.caption(f"Service: `{service}`")
 
@@ -253,6 +263,137 @@ def render_chat_tab(
             content=result.answer,
             sources=serialized_sources,
         )
+
+
+def render_documents_tab(
+    client: HomelabAPIClient,
+) -> None:
+    st.subheader("Documents")
+    st.caption("Upload documents to data/documents and index them immediately.")
+
+    uploaded_files = st.file_uploader(
+        label="Choose documents",
+        type=[
+            "txt",
+            "md",
+            "pdf",
+        ],
+        accept_multiple_files=True,
+        help=("Supported formats: text, Markdown, and text-based PDF files."),
+    )
+
+    if uploaded_files:
+        st.write(f"Selected files: **{len(uploaded_files)}**")
+
+        for uploaded_file in uploaded_files:
+            st.caption(f"{uploaded_file.name} ({uploaded_file.size:,} bytes)")
+
+    upload_clicked = st.button(
+        "Upload and index",
+        type="primary",
+        use_container_width=True,
+        disabled=not uploaded_files,
+    )
+
+    if upload_clicked:
+        upload_results: list[UploadResult] = []
+        failures: list[str] = []
+        total_files = len(uploaded_files)
+
+        with st.status(
+            "Uploading and indexing documents...",
+            expanded=True,
+        ) as upload_status:
+            for index, uploaded_file in enumerate(
+                uploaded_files,
+                start=1,
+            ):
+                st.write(f"**{index}/{total_files}:** Indexing `{uploaded_file.name}`...")
+
+                try:
+                    result = client.upload_document(
+                        filename=uploaded_file.name,
+                        content=uploaded_file.getvalue(),
+                        content_type=uploaded_file.type,
+                    )
+                except (
+                    ValueError,
+                    HomelabAPIError,
+                ) as exc:
+                    failure = f"{uploaded_file.name}: {exc}"
+                    failures.append(failure)
+                    st.error(failure)
+                else:
+                    upload_results.append(result)
+                    st.success(
+                        f"Indexed `{result.document}` "
+                        f"with {result.chunk_count} total "
+                        f"stored chunks."
+                    )
+
+            if failures:
+                upload_status.update(
+                    label=(f"Document processing finished with {len(failures)} error(s)."),
+                    state="error",
+                    expanded=True,
+                )
+            else:
+                upload_status.update(
+                    label=(f"Successfully indexed {len(upload_results)} document(s)."),
+                    state="complete",
+                    expanded=False,
+                )
+
+        st.session_state.upload_results = upload_results
+
+        if upload_results:
+            st.success(f"Uploaded and indexed {len(upload_results)} document(s).")
+
+    upload_results = st.session_state.upload_results
+
+    if not upload_results:
+        if not upload_clicked:
+            st.info("Select one or more documents, then click Upload and index.")
+
+        return
+
+    st.divider()
+    st.markdown("### Latest upload results")
+
+    rows = [
+        {
+            "Document": result.document,
+            "Size": result.size_bytes,
+            "Documents indexed": result.document_count,
+            "Chunks indexed": result.chunk_count,
+            "Status": result.status,
+        }
+        for result in upload_results
+    ]
+
+    st.dataframe(
+        rows,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Size": st.column_config.NumberColumn(
+                label="Size (bytes)",
+                format="%d",
+            ),
+            "Documents indexed": (
+                st.column_config.NumberColumn(
+                    format="%d",
+                )
+            ),
+            "Chunks indexed": (
+                st.column_config.NumberColumn(
+                    format="%d",
+                )
+            ),
+        },
+    )
+
+    st.success("The uploaded documents are now available in the Chat tab.")
 
 
 def render_evaluation_tab(
@@ -347,8 +488,8 @@ def display_evaluation_result(
             "Retrieved documents": ", ".join(question.retrieved_documents),
             "Hit@1": question.hit_at_1,
             "Hit@5": question.hit_at_5,
-            "Precision@5": question.precision_at_5,
-            "Recall@5": question.recall_at_5,
+            "Precision@5": (question.precision_at_5),
+            "Recall@5": (question.recall_at_5),
             "Reciprocal rank": (question.reciprocal_rank),
         }
         for question in result.questions
@@ -359,11 +500,31 @@ def display_evaluation_result(
         use_container_width=True,
         hide_index=True,
         column_config={
-            "Hit@1": st.column_config.NumberColumn(format="%.2f"),
-            "Hit@5": st.column_config.NumberColumn(format="%.2f"),
-            "Precision@5": (st.column_config.NumberColumn(format="%.2f")),
-            "Recall@5": (st.column_config.NumberColumn(format="%.2f")),
-            "Reciprocal rank": (st.column_config.NumberColumn(format="%.3f")),
+            "Hit@1": (
+                st.column_config.NumberColumn(
+                    format="%.2f",
+                )
+            ),
+            "Hit@5": (
+                st.column_config.NumberColumn(
+                    format="%.2f",
+                )
+            ),
+            "Precision@5": (
+                st.column_config.NumberColumn(
+                    format="%.2f",
+                )
+            ),
+            "Recall@5": (
+                st.column_config.NumberColumn(
+                    format="%.2f",
+                )
+            ),
+            "Reciprocal rank": (
+                st.column_config.NumberColumn(
+                    format="%.3f",
+                )
+            ),
         },
     )
 
@@ -386,9 +547,14 @@ def main() -> None:
 
     st.title("Homelab AI")
 
-    chat_tab, evaluation_tab = st.tabs(
+    (
+        chat_tab,
+        documents_tab,
+        evaluation_tab,
+    ) = st.tabs(
         [
             "Chat",
+            "Documents",
             "Evaluation",
         ]
     )
@@ -397,6 +563,11 @@ def main() -> None:
         render_chat_tab(
             client=client,
             top_k=top_k,
+        )
+
+    with documents_tab:
+        render_documents_tab(
+            client=client,
         )
 
     with evaluation_tab:

@@ -69,6 +69,15 @@ class SearchResult:
 
 
 @dataclass(frozen=True)
+class UploadResult:
+    document: str
+    size_bytes: int
+    document_count: int
+    chunk_count: int
+    status: str
+
+
+@dataclass(frozen=True)
 class EvaluationMetrics:
     question_count: int
     hit_at_1: float
@@ -123,8 +132,18 @@ class HomelabAPIClient:
         )
 
         return {
-            "status": str(response.get("status", "unknown")),
-            "service": str(response.get("service", "unknown")),
+            "status": str(
+                response.get(
+                    "status",
+                    "unknown",
+                )
+            ),
+            "service": str(
+                response.get(
+                    "service",
+                    "unknown",
+                )
+            ),
         }
 
     def search(
@@ -150,25 +169,112 @@ class HomelabAPIClient:
             },
         )
 
-        raw_sources = response.get("sources", [])
+        raw_sources = response.get(
+            "sources",
+            [],
+        )
 
         if not isinstance(raw_sources, list):
             raise HomelabAPIError("The backend returned an invalid sources field.")
 
         sources = [
             Source(
-                text=str(source.get("text", "")),
-                score=float(source.get("score", 0.0)),
-                document=str(source.get("document", "unknown")),
-                chunk_id=str(source.get("chunk_id", "")),
+                text=str(
+                    source.get(
+                        "text",
+                        "",
+                    )
+                ),
+                score=float(
+                    source.get(
+                        "score",
+                        0.0,
+                    )
+                ),
+                document=str(
+                    source.get(
+                        "document",
+                        "unknown",
+                    )
+                ),
+                chunk_id=str(
+                    source.get(
+                        "chunk_id",
+                        "",
+                    )
+                ),
             )
             for source in raw_sources
             if isinstance(source, dict)
         ]
 
         return SearchResult(
-            answer=str(response.get("answer", "")),
+            answer=str(
+                response.get(
+                    "answer",
+                    "",
+                )
+            ),
             sources=sources,
+        )
+
+    def upload_document(
+        self,
+        filename: str,
+        content: bytes,
+        content_type: str | None = None,
+    ) -> UploadResult:
+        cleaned_filename = filename.strip()
+
+        if not cleaned_filename:
+            raise ValueError("The uploaded file must have a filename.")
+
+        if not content:
+            raise ValueError("The uploaded file is empty.")
+
+        response = self._request(
+            method="POST",
+            path="/ingest",
+            files={
+                "file": (
+                    cleaned_filename,
+                    content,
+                    content_type or "application/octet-stream",
+                )
+            },
+        )
+
+        return UploadResult(
+            document=str(
+                response.get(
+                    "document",
+                    cleaned_filename,
+                )
+            ),
+            size_bytes=int(
+                response.get(
+                    "size_bytes",
+                    len(content),
+                )
+            ),
+            document_count=int(
+                response.get(
+                    "document_count",
+                    0,
+                )
+            ),
+            chunk_count=int(
+                response.get(
+                    "chunk_count",
+                    0,
+                )
+            ),
+            status=str(
+                response.get(
+                    "status",
+                    "unknown",
+                )
+            ),
         )
 
     def evaluate(
@@ -187,7 +293,10 @@ class HomelabAPIClient:
         )
 
         raw_metrics = response.get("metrics")
-        raw_questions = response.get("questions", [])
+        raw_questions = response.get(
+            "questions",
+            [],
+        )
 
         if not isinstance(raw_metrics, dict):
             raise HomelabAPIError("The backend returned invalid evaluation metrics.")
@@ -196,11 +305,36 @@ class HomelabAPIClient:
             raise HomelabAPIError("The backend returned invalid question results.")
 
         metrics = EvaluationMetrics(
-            question_count=int(raw_metrics.get("question_count", 0)),
-            hit_at_1=float(raw_metrics.get("hit_at_1", 0.0)),
-            hit_at_5=float(raw_metrics.get("hit_at_5", 0.0)),
-            precision_at_5=float(raw_metrics.get("precision_at_5", 0.0)),
-            recall_at_5=float(raw_metrics.get("recall_at_5", 0.0)),
+            question_count=int(
+                raw_metrics.get(
+                    "question_count",
+                    0,
+                )
+            ),
+            hit_at_1=float(
+                raw_metrics.get(
+                    "hit_at_1",
+                    0.0,
+                )
+            ),
+            hit_at_5=float(
+                raw_metrics.get(
+                    "hit_at_5",
+                    0.0,
+                )
+            ),
+            precision_at_5=float(
+                raw_metrics.get(
+                    "precision_at_5",
+                    0.0,
+                )
+            ),
+            recall_at_5=float(
+                raw_metrics.get(
+                    "recall_at_5",
+                    0.0,
+                )
+            ),
             mean_reciprocal_rank=float(
                 raw_metrics.get(
                     "mean_reciprocal_rank",
@@ -218,8 +352,18 @@ class HomelabAPIClient:
         return EvaluationResult(
             metrics=metrics,
             questions=questions,
-            top_k=int(response.get("top_k", top_k)),
-            elapsed_ms=float(response.get("elapsed_ms", 0.0)),
+            top_k=int(
+                response.get(
+                    "top_k",
+                    top_k,
+                )
+            ),
+            elapsed_ms=float(
+                response.get(
+                    "elapsed_ms",
+                    0.0,
+                )
+            ),
         )
 
     @staticmethod
@@ -235,25 +379,51 @@ class HomelabAPIClient:
             [],
         )
 
-        if not isinstance(relevant_documents, list):
+        if not isinstance(
+            relevant_documents,
+            list,
+        ):
             relevant_documents = []
 
-        if not isinstance(retrieved_documents, list):
+        if not isinstance(
+            retrieved_documents,
+            list,
+        ):
             retrieved_documents = []
 
         return QuestionEvaluation(
-            question=str(raw_question.get("question", "")),
+            question=str(
+                raw_question.get(
+                    "question",
+                    "",
+                )
+            ),
             relevant_documents=[str(document) for document in relevant_documents],
             retrieved_documents=[str(document) for document in retrieved_documents],
-            hit_at_1=float(raw_question.get("hit_at_1", 0.0)),
-            hit_at_5=float(raw_question.get("hit_at_5", 0.0)),
+            hit_at_1=float(
+                raw_question.get(
+                    "hit_at_1",
+                    0.0,
+                )
+            ),
+            hit_at_5=float(
+                raw_question.get(
+                    "hit_at_5",
+                    0.0,
+                )
+            ),
             precision_at_5=float(
                 raw_question.get(
                     "precision_at_5",
                     0.0,
                 )
             ),
-            recall_at_5=float(raw_question.get("recall_at_5", 0.0)),
+            recall_at_5=float(
+                raw_question.get(
+                    "recall_at_5",
+                    0.0,
+                )
+            ),
             reciprocal_rank=float(
                 raw_question.get(
                     "reciprocal_rank",
@@ -267,6 +437,11 @@ class HomelabAPIClient:
         method: str,
         path: str,
         json: dict[str, Any] | None = None,
+        files: dict[
+            str,
+            tuple[str, bytes, str],
+        ]
+        | None = None,
     ) -> dict[str, Any]:
         url = f"{self.base_url}{path}"
 
@@ -276,6 +451,7 @@ class HomelabAPIClient:
                     method=method,
                     url=url,
                     json=json,
+                    files=files,
                 )
                 response.raise_for_status()
 
