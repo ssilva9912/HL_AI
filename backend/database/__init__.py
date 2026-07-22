@@ -6,6 +6,10 @@ from backend.database.models import (
     IngestionJobStatus,
     IngestionOperation,
 )
+from backend.database.repositories import (
+    DocumentRepository,
+    IngestionJobRepository,
+)
 from backend.database.session import (
     DatabaseNotConfiguredError,
     check_database_connection,
@@ -18,8 +22,10 @@ __all__ = [
     "Base",
     "DatabaseNotConfiguredError",
     "Document",
+    "DocumentRepository",
     "DocumentStatus",
     "IngestionJob",
+    "IngestionJobRepository",
     "IngestionJobStatus",
     "IngestionOperation",
     "check_database_connection",
