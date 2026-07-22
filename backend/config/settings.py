@@ -1,7 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -58,6 +58,16 @@ class Settings(BaseSettings):
         default="homelab_documents",
         min_length=1,
         description="Qdrant collection containing document chunk embeddings.",
+    )
+
+    database_url: SecretStr | None = Field(
+        default=None,
+        description="SQLAlchemy connection URL for the PostgreSQL product database.",
+    )
+
+    database_echo: bool = Field(
+        default=False,
+        description="Log generated SQL statements. Keep disabled outside local debugging.",
     )
 
 
