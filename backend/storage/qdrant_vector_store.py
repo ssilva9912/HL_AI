@@ -220,6 +220,39 @@ class QdrantVectorStore:
         return int(result.count)
 
     def items(self) -> list[EmbeddedChunk]:
+        return self._scroll_items()
+
+    def document_items(
+        self,
+        document_name: str,
+        *,
+        document_id: UUID | None = None,
+    ) -> list[EmbeddedChunk]:
+        if not document_name.strip():
+            raise ValueError("document_name must not be empty")
+
+        scope_key, scope_value = self._document_scope(
+            document_name,
+            document_id,
+        )
+
+        return self._scroll_items(
+            models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key=scope_key,
+                        match=models.MatchValue(
+                            value=scope_value,
+                        ),
+                    )
+                ],
+            )
+        )
+
+    def _scroll_items(
+        self,
+        scroll_filter: models.Filter | None = None,
+    ) -> list[EmbeddedChunk]:
         if not self._collection_exists():
             return []
 
@@ -229,6 +262,7 @@ class QdrantVectorStore:
         while True:
             page, offset = self._client.scroll(
                 collection_name=self._collection_name,
+                scroll_filter=scroll_filter,
                 offset=offset,
                 limit=256,
                 with_payload=True,

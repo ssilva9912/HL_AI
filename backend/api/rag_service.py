@@ -5,9 +5,13 @@ from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
+from uuid import UUID
+
+from sqlalchemy.orm import Session
 
 from backend.config import Settings, get_settings
 from backend.database import (
+    DocumentRepository,
     IngestionHandle,
     IngestionLifecycle,
     IngestionOperation,
@@ -17,16 +21,12 @@ from backend.demo import (
     build_rag_pipeline,
     create_demo_documents,
 )
-from backend.embeddings.ollama_embedder import (
-    OllamaEmbedder,
-)
+from backend.embeddings.ollama_embedder import OllamaEmbedder
 from backend.indexing.indexer import Indexer
 from backend.indexing.models import IndexedCorpus
 from backend.interfaces.embedder import EmbeddedChunk
 from backend.interfaces.parser import ParsedDocument
-from backend.storage.qdrant_vector_store import (
-    QdrantVectorStore,
-)
+from backend.storage.qdrant_vector_store import QdrantVectorStore
 from evaluation.dataset import load_evaluation_dataset
 from evaluation.evaluator import (
     EvaluationReport,
@@ -64,6 +64,14 @@ class DocumentTooLargeError(ValueError):
     pass
 
 
+class DocumentNotFoundError(LookupError):
+    pass
+
+
+class UnsafeDocumentPathError(RuntimeError):
+    pass
+
+
 @dataclass(frozen=True)
 class RAGSource:
     text: str
@@ -86,6 +94,13 @@ class IngestionResult:
     chunk_count: int
     status: str = "indexed"
     document_chunk_count: int | None = None
+
+
+@dataclass(frozen=True)
+class DocumentDeletionResult:
+    document_id: UUID
+    document: str
+    deleted_chunk_count: int
 
 
 class HomelabRAGService:
@@ -158,7 +173,7 @@ class HomelabRAGService:
     ) -> QdrantVectorStore:
         if self._vector_store is None:
             self._vector_store = QdrantVectorStore(
-                storage_path=(self._vector_store_path),
+                storage_path=self._vector_store_path,
                 collection_name=(self._settings.vector_collection_name),
             )
 
@@ -337,8 +352,7 @@ class HomelabRAGService:
             raise UnsupportedDocumentTypeError(
                 f"Unsupported document type: "
                 f"{extension or '<none>'}. "
-                f"Supported extensions: "
-                f"{supported}.",
+                f"Supported extensions: {supported}.",
             )
 
         if not content:
@@ -422,20 +436,126 @@ class HomelabRAGService:
                 destination=destination,
                 normalized_filename=(normalized_filename),
                 content=content,
-                previous_content=(previous_content),
+                previous_content=previous_content,
                 previous_corpus=previous_corpus,
-                ingestion_handle=(ingestion_handle),
+                ingestion_handle=ingestion_handle,
             )
 
         return self._ingest_with_persistent_store(
             destination=destination,
-            normalized_filename=(normalized_filename),
+            normalized_filename=normalized_filename,
             content=content,
-            previous_content=(previous_content),
+            previous_content=previous_content,
             previous_corpus=previous_corpus,
             previous_document_chunks=(previous_document_chunks),
-            ingestion_handle=(ingestion_handle),
+            ingestion_handle=ingestion_handle,
         )
+
+    def delete_document(
+        self,
+        document_id: UUID,
+        session: Session,
+    ) -> DocumentDeletionResult:
+        documents = DocumentRepository(session)
+        document = documents.get(document_id)
+
+        if document is None:
+            raise DocumentNotFoundError(
+                "Document not found.",
+            )
+
+        filename = document.filename
+        destination = self._managed_document_path(
+            document.storage_path,
+        )
+
+        previous_content = destination.read_bytes() if destination.exists() else None
+        previous_corpus = self._corpus
+
+        vector_store = self._get_vector_store()
+        previous_document_chunks = vector_store.document_items(
+            document_name=filename,
+            document_id=document_id,
+        )
+
+        qdrant_delete_attempted = False
+
+        try:
+            qdrant_delete_attempted = True
+
+            vector_store.delete_document(
+                document_name=filename,
+                document_id=document_id,
+            )
+
+            if previous_content is not None:
+                destination.unlink(
+                    missing_ok=True,
+                )
+
+            documents.delete(document)
+            session.commit()
+
+        except Exception:
+            session.rollback()
+
+            if previous_content is not None:
+                try:
+                    destination.parent.mkdir(
+                        parents=True,
+                        exist_ok=True,
+                    )
+                    destination.write_bytes(
+                        previous_content,
+                    )
+                except Exception:
+                    logger.exception(
+                        "Failed to restore the document file after deletion error",
+                    )
+
+            if qdrant_delete_attempted and previous_document_chunks:
+                try:
+                    vector_store.replace_document(
+                        document_name=filename,
+                        embedded_chunks=(previous_document_chunks),
+                        document_id=document_id,
+                    )
+                except Exception:
+                    logger.exception(
+                        "Failed to restore Qdrant points after deletion error",
+                    )
+
+            self._corpus = previous_corpus
+
+            raise
+
+        self._corpus = None
+
+        return DocumentDeletionResult(
+            document_id=document_id,
+            document=filename,
+            deleted_chunk_count=len(
+                previous_document_chunks,
+            ),
+        )
+
+    def _managed_document_path(
+        self,
+        storage_path: str,
+    ) -> Path:
+        managed_directory = self._document_directory.resolve()
+        destination = Path(
+            storage_path,
+        ).resolve()
+
+        if not destination.is_relative_to(
+            managed_directory,
+        ):
+            raise UnsafeDocumentPathError(
+                "Document storage path is outside the managed document directory.",
+            )
+
+        return destination
 
     def _ingest_with_factory(
         self,
@@ -444,8 +564,8 @@ class HomelabRAGService:
         normalized_filename: str,
         content: bytes,
         previous_content: bytes | None,
-        previous_corpus: (IndexedCorpus | None),
-        ingestion_handle: (IngestionHandle | None),
+        previous_corpus: IndexedCorpus | None,
+        ingestion_handle: IngestionHandle | None,
     ) -> IngestionResult:
         destination.write_bytes(content)
         self._corpus = None
@@ -460,7 +580,7 @@ class HomelabRAGService:
         except Exception as error:
             self._restore_document(
                 destination=destination,
-                previous_content=(previous_content),
+                previous_content=previous_content,
             )
 
             self._corpus = previous_corpus
@@ -476,7 +596,7 @@ class HomelabRAGService:
             document=normalized_filename,
             size_bytes=len(content),
             document_count=(rebuilt_corpus.document_count),
-            chunk_count=(rebuilt_corpus.chunk_count),
+            chunk_count=rebuilt_corpus.chunk_count,
             document_chunk_count=(rebuilt_corpus.chunk_count),
         )
 
@@ -507,7 +627,7 @@ class HomelabRAGService:
 
             vector_store.replace_document(
                 document_name=normalized_filename,
-                embedded_chunks=staged_corpus.embedded_chunks,
+                embedded_chunks=(staged_corpus.embedded_chunks),
                 document_id=document_id,
             )
 
@@ -524,15 +644,15 @@ class HomelabRAGService:
 
             self._complete_ingestion(
                 ingestion_handle,
-                chunk_count=staged_corpus.chunk_count,
+                chunk_count=(staged_corpus.chunk_count),
             )
 
             return IngestionResult(
                 document=normalized_filename,
                 size_bytes=len(content),
-                document_count=updated_corpus.document_count,
-                chunk_count=updated_corpus.chunk_count,
-                document_chunk_count=staged_corpus.chunk_count,
+                document_count=(updated_corpus.document_count),
+                chunk_count=(updated_corpus.chunk_count),
+                document_chunk_count=(staged_corpus.chunk_count),
             )
 
         except Exception as error:
@@ -547,13 +667,13 @@ class HomelabRAGService:
 
                     if previous_document_chunks:
                         vector_store.replace_document(
-                            document_name=normalized_filename,
-                            embedded_chunks=previous_document_chunks,
+                            document_name=(normalized_filename),
+                            embedded_chunks=(previous_document_chunks),
                             document_id=document_id,
                         )
                     else:
                         vector_store.delete_document(
-                            document_name=normalized_filename,
+                            document_name=(normalized_filename),
                             document_id=document_id,
                         )
             except Exception:
@@ -581,7 +701,9 @@ class HomelabRAGService:
         if self._ingestion_lifecycle is None:
             return None
 
-        content_type, _ = mimetypes.guess_type(filename)
+        content_type, _ = mimetypes.guess_type(
+            filename,
+        )
 
         return self._ingestion_lifecycle.begin(
             filename=filename,
@@ -590,7 +712,9 @@ class HomelabRAGService:
             ),
             content_type=content_type,
             size_bytes=len(content),
-            checksum_sha256=(sha256(content).hexdigest()),
+            checksum_sha256=sha256(
+                content,
+            ).hexdigest(),
             operation=operation,
         )
 

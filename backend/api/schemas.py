@@ -94,6 +94,21 @@ class DocumentResponse(BaseModel):
     updated_at: datetime
 
 
+class IngestionJobResponse(BaseModel):
+    id: UUID
+    document_id: UUID
+    operation: str
+    status: str
+    attempt_count: int
+    processed_chunks: int
+    total_chunks: int | None
+    error_message: str | None
+    created_at: datetime
+    started_at: datetime | None
+    completed_at: datetime | None
+    updated_at: datetime
+
+
 class HealthResponse(BaseModel):
     status: str
     service: str

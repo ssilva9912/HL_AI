@@ -312,3 +312,55 @@ def test_qdrant_store_rejects_invalid_top_k(
         )
 
     store.close()
+
+
+def test_qdrant_store_returns_document_items_by_database_id(
+    tmp_path: Path,
+) -> None:
+    store = QdrantVectorStore(
+        storage_path=tmp_path / "qdrant",
+    )
+
+    first_document_id = uuid4()
+    second_document_id = uuid4()
+
+    store.replace_document(
+        "shared.txt",
+        [
+            make_embedded_chunk(
+                filename="shared.txt",
+                content="First database document.",
+                vector=[1.0, 0.0],
+            )
+        ],
+        document_id=first_document_id,
+    )
+
+    store.replace_document(
+        "shared.txt",
+        [
+            make_embedded_chunk(
+                filename="shared.txt",
+                content="Second database document.",
+                vector=[0.0, 1.0],
+            )
+        ],
+        document_id=second_document_id,
+    )
+
+    first_items = store.document_items(
+        "shared.txt",
+        document_id=first_document_id,
+    )
+    second_items = store.document_items(
+        "shared.txt",
+        document_id=second_document_id,
+    )
+
+    assert len(first_items) == 1
+    assert first_items[0].chunk.content == "First database document."
+
+    assert len(second_items) == 1
+    assert second_items[0].chunk.content == "Second database document."
+
+    store.close()
