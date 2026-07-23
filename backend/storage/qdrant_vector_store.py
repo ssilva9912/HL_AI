@@ -3,7 +3,7 @@ from collections.abc import Mapping, Sequence
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
-from uuid import NAMESPACE_URL, uuid5
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from qdrant_client import QdrantClient, models
 
@@ -71,6 +71,8 @@ class QdrantVectorStore:
         self,
         document_name: str,
         embedded_chunks: Sequence[EmbeddedChunk],
+        *,
+        document_id: UUID | None = None,
     ) -> None:
         if not document_name.strip():
             raise ValueError("document_name must not be empty")
@@ -89,6 +91,7 @@ class QdrantVectorStore:
         points = self._build_points(
             embedded_chunks,
             document_version,
+            document_id=document_id,
         )
 
         self._upsert(
@@ -96,12 +99,17 @@ class QdrantVectorStore:
             vector_size=len(embedded_chunks[0].vector),
         )
 
+        scope_key, scope_value = self._document_scope(
+            document_name,
+            document_id,
+        )
+
         stale_points = models.Filter(
             must=[
                 models.FieldCondition(
-                    key="document_name",
+                    key=scope_key,
                     match=models.MatchValue(
-                        value=document_name,
+                        value=scope_value,
                     ),
                 )
             ],
@@ -123,12 +131,27 @@ class QdrantVectorStore:
             wait=True,
         )
 
+        if document_id is not None:
+            self._delete_legacy_document_points(
+                document_name,
+            )
+
     def delete_document(
         self,
         document_name: str,
+        *,
+        document_id: UUID | None = None,
     ) -> None:
+        if not document_name.strip():
+            raise ValueError("document_name must not be empty")
+
         if not self._collection_exists():
             return
+
+        scope_key, scope_value = self._document_scope(
+            document_name,
+            document_id,
+        )
 
         self._client.delete(
             collection_name=self._collection_name,
@@ -136,9 +159,9 @@ class QdrantVectorStore:
                 filter=models.Filter(
                     must=[
                         models.FieldCondition(
-                            key="document_name",
+                            key=scope_key,
                             match=models.MatchValue(
-                                value=document_name,
+                                value=scope_value,
                             ),
                         )
                     ]
@@ -280,16 +303,58 @@ class QdrantVectorStore:
             wait=True,
         )
 
+    def _delete_legacy_document_points(
+        self,
+        document_name: str,
+    ) -> None:
+        legacy_points = models.Filter(
+            must=[
+                models.FieldCondition(
+                    key="document_name",
+                    match=models.MatchValue(
+                        value=document_name,
+                    ),
+                ),
+                models.IsEmptyCondition(
+                    is_empty=models.PayloadField(
+                        key="document_id",
+                    ),
+                ),
+            ],
+        )
+
+        self._client.delete(
+            collection_name=self._collection_name,
+            points_selector=models.FilterSelector(
+                filter=legacy_points,
+            ),
+            wait=True,
+        )
+
+    @staticmethod
+    def _document_scope(
+        document_name: str,
+        document_id: UUID | None,
+    ) -> tuple[str, str]:
+        if document_id is None:
+            return "document_name", document_name
+
+        return "document_id", str(document_id)
+
     @classmethod
     def _build_points(
         cls,
         embedded_chunks: Sequence[EmbeddedChunk],
         document_version: str,
+        *,
+        document_id: UUID | None = None,
     ) -> list[models.PointStruct]:
         vector_sizes = {len(embedded_chunk.vector) for embedded_chunk in embedded_chunks}
 
         if len(vector_sizes) != 1 or 0 in vector_sizes:
-            raise ValueError("all vectors must have the same non-zero dimension")
+            raise ValueError(
+                "all vectors must have the same non-zero dimension",
+            )
 
         points: list[models.PointStruct] = []
 
@@ -298,12 +363,30 @@ class QdrantVectorStore:
             document = chunk.source_document
             metadata = document.metadata
 
+            document_identity = str(document_id) if document_id is not None else metadata.name
+
             point_key = (
-                f"{metadata.name}:{document_version}:"
+                f"{document_identity}:{document_version}:"
                 f"{chunk.chunk_index}:"
                 f"{chunk.start_char}:"
                 f"{chunk.end_char}"
             )
+
+            payload: dict[str, Any] = {
+                "document_name": metadata.name,
+                "document_version": document_version,
+                "source_path": str(document.source_path),
+                "extension": metadata.extension,
+                "size_bytes": metadata.size_bytes,
+                "file_type": document.file_type,
+                "chunk_content": chunk.content,
+                "chunk_index": chunk.chunk_index,
+                "start_char": chunk.start_char,
+                "end_char": chunk.end_char,
+            }
+
+            if document_id is not None:
+                payload["document_id"] = str(document_id)
 
             points.append(
                 models.PointStruct(
@@ -314,18 +397,7 @@ class QdrantVectorStore:
                         )
                     ),
                     vector=embedded_chunk.vector,
-                    payload={
-                        "document_name": metadata.name,
-                        "document_version": document_version,
-                        "source_path": str(document.source_path),
-                        "extension": metadata.extension,
-                        "size_bytes": metadata.size_bytes,
-                        "file_type": document.file_type,
-                        "chunk_content": chunk.content,
-                        "chunk_index": chunk.chunk_index,
-                        "start_char": chunk.start_char,
-                        "end_char": chunk.end_char,
-                    },
+                    payload=payload,
                 )
             )
 
@@ -408,7 +480,9 @@ class QdrantVectorStore:
         raw_vector = record.vector
 
         if not isinstance(raw_vector, list):
-            raise ValueError("Qdrant point does not contain a dense vector")
+            raise ValueError(
+                "Qdrant point does not contain a dense vector",
+            )
 
         chunk = DocumentChunk(
             source_document=document,
@@ -443,7 +517,9 @@ class QdrantVectorStore:
         value = payload.get(key)
 
         if not isinstance(value, str):
-            raise ValueError(f"Qdrant payload field {key!r} must be a string")
+            raise ValueError(
+                f"Qdrant payload field {key!r} must be a string",
+            )
 
         return value
 
@@ -455,6 +531,8 @@ class QdrantVectorStore:
         value = payload.get(key)
 
         if not isinstance(value, int):
-            raise ValueError(f"Qdrant payload field {key!r} must be an integer")
+            raise ValueError(
+                f"Qdrant payload field {key!r} must be an integer",
+            )
 
         return value

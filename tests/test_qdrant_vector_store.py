@@ -1,4 +1,5 @@
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 
@@ -183,6 +184,113 @@ def test_qdrant_store_replaces_old_document_chunks(
             "Keep this document.",
         ),
     }
+
+    store.close()
+
+
+def test_qdrant_store_scopes_documents_by_database_id(
+    tmp_path: Path,
+) -> None:
+    store = QdrantVectorStore(
+        storage_path=tmp_path / "qdrant",
+    )
+
+    first_document_id = uuid4()
+    second_document_id = uuid4()
+
+    store.replace_document(
+        "shared.txt",
+        [
+            make_embedded_chunk(
+                filename="shared.txt",
+                content="First database document.",
+                vector=[1.0, 0.0],
+            )
+        ],
+        document_id=first_document_id,
+    )
+
+    store.replace_document(
+        "shared.txt",
+        [
+            make_embedded_chunk(
+                filename="shared.txt",
+                content="Second database document.",
+                vector=[0.0, 1.0],
+            )
+        ],
+        document_id=second_document_id,
+    )
+
+    store.replace_document(
+        "shared.txt",
+        [
+            make_embedded_chunk(
+                filename="shared.txt",
+                content="Updated first document.",
+                vector=[0.9, 0.1],
+            )
+        ],
+        document_id=first_document_id,
+    )
+
+    assert store.count() == 2
+
+    stored_contents = {item.chunk.content for item in store.items()}
+
+    assert stored_contents == {
+        "Updated first document.",
+        "Second database document.",
+    }
+
+    store.delete_document(
+        "shared.txt",
+        document_id=first_document_id,
+    )
+
+    remaining_items = store.items()
+
+    assert store.count() == 1
+    assert len(remaining_items) == 1
+    assert remaining_items[0].chunk.content == "Second database document."
+
+    store.close()
+
+
+def test_qdrant_store_migrates_legacy_name_scoped_points(
+    tmp_path: Path,
+) -> None:
+    store = QdrantVectorStore(
+        storage_path=tmp_path / "qdrant",
+    )
+
+    store.add_many(
+        [
+            make_embedded_chunk(
+                filename="legacy.txt",
+                content="Legacy document version.",
+                vector=[1.0, 0.0],
+            )
+        ]
+    )
+
+    store.replace_document(
+        "legacy.txt",
+        [
+            make_embedded_chunk(
+                filename="legacy.txt",
+                content="Database-linked version.",
+                vector=[1.0, 0.0],
+            )
+        ],
+        document_id=uuid4(),
+    )
+
+    items = store.items()
+
+    assert store.count() == 1
+    assert len(items) == 1
+    assert items[0].chunk.content == "Database-linked version."
 
     store.close()
 

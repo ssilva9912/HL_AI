@@ -487,11 +487,13 @@ class HomelabRAGService:
         normalized_filename: str,
         content: bytes,
         previous_content: bytes | None,
-        previous_corpus: (IndexedCorpus | None),
+        previous_corpus: IndexedCorpus | None,
         previous_document_chunks: list[EmbeddedChunk],
-        ingestion_handle: (IngestionHandle | None),
+        ingestion_handle: IngestionHandle | None,
     ) -> IngestionResult:
         destination.write_bytes(content)
+
+        document_id = ingestion_handle.document_id if ingestion_handle is not None else None
 
         vector_store_touched = False
 
@@ -504,8 +506,9 @@ class HomelabRAGService:
             vector_store_touched = True
 
             vector_store.replace_document(
-                document_name=(normalized_filename),
-                embedded_chunks=(staged_corpus.embedded_chunks),
+                document_name=normalized_filename,
+                embedded_chunks=staged_corpus.embedded_chunks,
+                document_id=document_id,
             )
 
             updated_corpus = self._load_persisted_corpus()
@@ -521,34 +524,41 @@ class HomelabRAGService:
 
             self._complete_ingestion(
                 ingestion_handle,
-                chunk_count=(staged_corpus.chunk_count),
+                chunk_count=staged_corpus.chunk_count,
             )
 
             return IngestionResult(
                 document=normalized_filename,
                 size_bytes=len(content),
-                document_count=(updated_corpus.document_count),
-                chunk_count=(updated_corpus.chunk_count),
-                document_chunk_count=(staged_corpus.chunk_count),
+                document_count=updated_corpus.document_count,
+                chunk_count=updated_corpus.chunk_count,
+                document_chunk_count=staged_corpus.chunk_count,
             )
 
         except Exception as error:
             self._restore_document(
                 destination=destination,
-                previous_content=(previous_content),
+                previous_content=previous_content,
             )
 
             try:
                 if vector_store_touched:
-                    (
-                        self._get_vector_store().replace_document(
-                            document_name=(normalized_filename),
-                            embedded_chunks=(previous_document_chunks),
+                    vector_store = self._get_vector_store()
+
+                    if previous_document_chunks:
+                        vector_store.replace_document(
+                            document_name=normalized_filename,
+                            embedded_chunks=previous_document_chunks,
+                            document_id=document_id,
                         )
-                    )
+                    else:
+                        vector_store.delete_document(
+                            document_name=normalized_filename,
+                            document_id=document_id,
+                        )
             except Exception:
                 logger.exception(
-                    "Failed to restore the previous Qdrant document after ingestion error",
+                    "Failed to roll back the Qdrant document after ingestion error",
                 )
             finally:
                 self._corpus = previous_corpus
