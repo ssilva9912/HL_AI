@@ -2,7 +2,10 @@ import logging
 
 from fastapi import FastAPI
 
-from backend.api.routes import router
+from backend.api.ingestion_routes import (
+    router as ingestion_router,
+)
+from backend.api.routes import router as api_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -17,7 +20,8 @@ def create_app() -> FastAPI:
         version="0.1.0",
     )
 
-    application.include_router(router)
+    application.include_router(api_router)
+    application.include_router(ingestion_router)
 
     return application
 

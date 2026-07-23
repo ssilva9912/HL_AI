@@ -257,3 +257,60 @@ class IngestionJob(Base):
     document: Mapped[Document] = relationship(
         back_populates="ingestion_jobs",
     )
+
+    payload: Mapped[IngestionPayload | None] = relationship(
+        back_populates="job",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        uselist=False,
+    )
+
+
+class IngestionPayload(Base):
+    __tablename__ = "ingestion_payloads"
+    __table_args__ = (
+        CheckConstraint(
+            "size_bytes >= 0",
+            name="ingestion_payload_size_bytes_nonnegative",
+        ),
+    )
+
+    job_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            "ingestion_jobs.id",
+            ondelete="CASCADE",
+        ),
+        primary_key=True,
+    )
+
+    staged_path: Mapped[str] = mapped_column(
+        String(1024),
+        nullable=False,
+        unique=True,
+    )
+
+    content_type: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    size_bytes: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+    )
+
+    checksum_sha256: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        index=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    job: Mapped[IngestionJob] = relationship(
+        back_populates="payload",
+    )

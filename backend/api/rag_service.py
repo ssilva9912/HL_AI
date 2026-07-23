@@ -41,7 +41,9 @@ SUPPORTED_DOCUMENT_EXTENSIONS = {
     ".pdf",
 }
 
-DEFAULT_EVALUATION_DATASET = Path("evaluation/sample_questions.json")
+DEFAULT_EVALUATION_DATASET = Path(
+    "evaluation/sample_questions.json",
+)
 
 IndexerFactory = Callable[[], Indexer]
 
@@ -83,6 +85,7 @@ class IngestionResult:
     document_count: int
     chunk_count: int
     status: str = "indexed"
+    document_chunk_count: int | None = None
 
 
 class HomelabRAGService:
@@ -139,7 +142,9 @@ class HomelabRAGService:
         )
 
         if not any(self._document_directory.iterdir()):
-            create_demo_documents(self._document_directory)
+            create_demo_documents(
+                self._document_directory,
+            )
 
     def _create_embedder(self) -> OllamaEmbedder:
         return OllamaEmbedder(
@@ -153,8 +158,8 @@ class HomelabRAGService:
     ) -> QdrantVectorStore:
         if self._vector_store is None:
             self._vector_store = QdrantVectorStore(
-                storage_path=self._vector_store_path,
-                collection_name=self._settings.vector_collection_name,
+                storage_path=(self._vector_store_path),
+                collection_name=(self._settings.vector_collection_name),
             )
 
         return self._vector_store
@@ -201,14 +206,18 @@ class HomelabRAGService:
             )
 
         return IndexedCorpus(
-            documents=list(documents_by_key.values()),
+            documents=list(
+                documents_by_key.values(),
+            ),
             chunks=chunks,
             embedded_chunks=embedded_chunks,
             vector_store=vector_store,
             embedder=self._create_embedder(),
         )
 
-    def _rebuild_corpus(self) -> IndexedCorpus:
+    def _rebuild_corpus(
+        self,
+    ) -> IndexedCorpus:
         self._prepare_document_directory()
 
         if self._indexer_factory is None:
@@ -242,12 +251,16 @@ class HomelabRAGService:
         normalized_question = question.strip()
 
         if not normalized_question:
-            raise ValueError("question must not be empty")
+            raise ValueError(
+                "question must not be empty",
+            )
 
         resolved_top_k = top_k if top_k is not None else self._settings.default_top_k
 
         if resolved_top_k <= 0:
-            raise ValueError("top_k must be positive")
+            raise ValueError(
+                "top_k must be positive",
+            )
 
         corpus = self._get_corpus()
 
@@ -256,7 +269,9 @@ class HomelabRAGService:
             top_k=resolved_top_k,
         )
 
-        result = pipeline.ask(normalized_question)
+        result = pipeline.ask(
+            normalized_question,
+        )
 
         return RAGAnswer(
             answer=result.answer,
@@ -268,7 +283,9 @@ class HomelabRAGService:
         top_k: int = 5,
     ) -> EvaluationReport:
         if top_k <= 0:
-            raise ValueError("top_k must be positive")
+            raise ValueError(
+                "top_k must be positive",
+            )
 
         questions = load_evaluation_dataset(
             self._evaluation_dataset_path,
@@ -276,7 +293,7 @@ class HomelabRAGService:
 
         return evaluate_retriever(
             questions=questions,
-            retrieve_documents=self._retrieve_document_names,
+            retrieve_documents=(self._retrieve_document_names),
             top_k=top_k,
         )
 
@@ -296,6 +313,8 @@ class HomelabRAGService:
         self,
         filename: str,
         content: bytes,
+        *,
+        track_ingestion: bool = True,
     ) -> IngestionResult:
         normalized_filename = filename.strip()
 
@@ -304,17 +323,22 @@ class HomelabRAGService:
                 "A valid filename without directory components is required.",
             )
 
-        extension = Path(normalized_filename).suffix.lower()
+        extension = Path(
+            normalized_filename,
+        ).suffix.lower()
 
         if extension not in SUPPORTED_DOCUMENT_EXTENSIONS:
             supported = ", ".join(
-                sorted(SUPPORTED_DOCUMENT_EXTENSIONS),
+                sorted(
+                    SUPPORTED_DOCUMENT_EXTENSIONS,
+                ),
             )
 
             raise UnsupportedDocumentTypeError(
                 f"Unsupported document type: "
                 f"{extension or '<none>'}. "
-                f"Supported extensions: {supported}.",
+                f"Supported extensions: "
+                f"{supported}.",
             )
 
         if not content:
@@ -354,18 +378,24 @@ class HomelabRAGService:
             IngestionOperation.REINDEX if previous_content is not None else IngestionOperation.INDEX
         )
 
-        ingestion_handle = self._begin_ingestion(
-            filename=normalized_filename,
-            destination=destination,
-            content=content,
-            operation=operation,
+        ingestion_handle = (
+            self._begin_ingestion(
+                filename=normalized_filename,
+                destination=destination,
+                content=content,
+                operation=operation,
+            )
+            if track_ingestion
+            else None
         )
 
         if previous_content == content and existing_corpus is not None and previous_document_chunks:
             try:
                 self._complete_ingestion(
                     ingestion_handle,
-                    chunk_count=len(previous_document_chunks),
+                    chunk_count=len(
+                        previous_document_chunks,
+                    ),
                 )
             except Exception as error:
                 self._record_ingestion_failure(
@@ -379,29 +409,32 @@ class HomelabRAGService:
             return IngestionResult(
                 document=normalized_filename,
                 size_bytes=len(content),
-                document_count=existing_corpus.document_count,
-                chunk_count=existing_corpus.chunk_count,
+                document_count=(existing_corpus.document_count),
+                chunk_count=(existing_corpus.chunk_count),
                 status="unchanged",
+                document_chunk_count=len(
+                    previous_document_chunks,
+                ),
             )
 
         if self._indexer_factory is not None:
             return self._ingest_with_factory(
                 destination=destination,
-                normalized_filename=normalized_filename,
+                normalized_filename=(normalized_filename),
                 content=content,
-                previous_content=previous_content,
+                previous_content=(previous_content),
                 previous_corpus=previous_corpus,
-                ingestion_handle=ingestion_handle,
+                ingestion_handle=(ingestion_handle),
             )
 
         return self._ingest_with_persistent_store(
             destination=destination,
-            normalized_filename=normalized_filename,
+            normalized_filename=(normalized_filename),
             content=content,
-            previous_content=previous_content,
+            previous_content=(previous_content),
             previous_corpus=previous_corpus,
-            previous_document_chunks=previous_document_chunks,
-            ingestion_handle=ingestion_handle,
+            previous_document_chunks=(previous_document_chunks),
+            ingestion_handle=(ingestion_handle),
         )
 
     def _ingest_with_factory(
@@ -411,8 +444,8 @@ class HomelabRAGService:
         normalized_filename: str,
         content: bytes,
         previous_content: bytes | None,
-        previous_corpus: IndexedCorpus | None,
-        ingestion_handle: IngestionHandle | None,
+        previous_corpus: (IndexedCorpus | None),
+        ingestion_handle: (IngestionHandle | None),
     ) -> IngestionResult:
         destination.write_bytes(content)
         self._corpus = None
@@ -422,12 +455,12 @@ class HomelabRAGService:
 
             self._complete_ingestion(
                 ingestion_handle,
-                chunk_count=rebuilt_corpus.chunk_count,
+                chunk_count=(rebuilt_corpus.chunk_count),
             )
         except Exception as error:
             self._restore_document(
                 destination=destination,
-                previous_content=previous_content,
+                previous_content=(previous_content),
             )
 
             self._corpus = previous_corpus
@@ -442,8 +475,9 @@ class HomelabRAGService:
         return IngestionResult(
             document=normalized_filename,
             size_bytes=len(content),
-            document_count=rebuilt_corpus.document_count,
-            chunk_count=rebuilt_corpus.chunk_count,
+            document_count=(rebuilt_corpus.document_count),
+            chunk_count=(rebuilt_corpus.chunk_count),
+            document_chunk_count=(rebuilt_corpus.chunk_count),
         )
 
     def _ingest_with_persistent_store(
@@ -453,9 +487,9 @@ class HomelabRAGService:
         normalized_filename: str,
         content: bytes,
         previous_content: bytes | None,
-        previous_corpus: IndexedCorpus | None,
+        previous_corpus: (IndexedCorpus | None),
         previous_document_chunks: list[EmbeddedChunk],
-        ingestion_handle: IngestionHandle | None,
+        ingestion_handle: (IngestionHandle | None),
     ) -> IngestionResult:
         destination.write_bytes(content)
 
@@ -470,43 +504,47 @@ class HomelabRAGService:
             vector_store_touched = True
 
             vector_store.replace_document(
-                document_name=normalized_filename,
-                embedded_chunks=staged_corpus.embedded_chunks,
+                document_name=(normalized_filename),
+                embedded_chunks=(staged_corpus.embedded_chunks),
             )
 
             updated_corpus = self._load_persisted_corpus()
 
             if updated_corpus is None:
                 raise RuntimeError(
-                    "The document was embedded, but the persisted "
-                    "vector index could not be loaded.",
+                    "The document was embedded, "
+                    "but the persisted vector index "
+                    "could not be loaded.",
                 )
 
             self._corpus = updated_corpus
 
             self._complete_ingestion(
                 ingestion_handle,
-                chunk_count=staged_corpus.chunk_count,
+                chunk_count=(staged_corpus.chunk_count),
             )
 
             return IngestionResult(
                 document=normalized_filename,
                 size_bytes=len(content),
-                document_count=updated_corpus.document_count,
-                chunk_count=updated_corpus.chunk_count,
+                document_count=(updated_corpus.document_count),
+                chunk_count=(updated_corpus.chunk_count),
+                document_chunk_count=(staged_corpus.chunk_count),
             )
 
         except Exception as error:
             self._restore_document(
                 destination=destination,
-                previous_content=previous_content,
+                previous_content=(previous_content),
             )
 
             try:
                 if vector_store_touched:
-                    self._get_vector_store().replace_document(
-                        document_name=normalized_filename,
-                        embedded_chunks=previous_document_chunks,
+                    (
+                        self._get_vector_store().replace_document(
+                            document_name=(normalized_filename),
+                            embedded_chunks=(previous_document_chunks),
+                        )
                     )
             except Exception:
                 logger.exception(
@@ -537,10 +575,12 @@ class HomelabRAGService:
 
         return self._ingestion_lifecycle.begin(
             filename=filename,
-            storage_path=str(destination.resolve()),
+            storage_path=str(
+                destination.resolve(),
+            ),
             content_type=content_type,
             size_bytes=len(content),
-            checksum_sha256=sha256(content).hexdigest(),
+            checksum_sha256=(sha256(content).hexdigest()),
             operation=operation,
         )
 
@@ -603,9 +643,13 @@ class HomelabRAGService:
         previous_content: bytes | None,
     ) -> None:
         if previous_content is None:
-            destination.unlink(missing_ok=True)
+            destination.unlink(
+                missing_ok=True,
+            )
         else:
-            destination.write_bytes(previous_content)
+            destination.write_bytes(
+                previous_content,
+            )
 
     @staticmethod
     def _normalize_source(
