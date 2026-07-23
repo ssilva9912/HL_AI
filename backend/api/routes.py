@@ -7,9 +7,11 @@ from fastapi import (
     Depends,
     File,
     HTTPException,
+    Query,
     UploadFile,
     status,
 )
+from sqlalchemy.orm import Session
 
 from backend.api.dependencies import get_rag_service
 from backend.api.rag_service import (
@@ -20,6 +22,7 @@ from backend.api.rag_service import (
     UnsupportedDocumentTypeError,
 )
 from backend.api.schemas import (
+    DocumentResponse,
     EvaluationMetricsResponse,
     EvaluationRequest,
     EvaluationResponse,
@@ -30,6 +33,10 @@ from backend.api.schemas import (
     SearchRequest,
     SearchResponse,
     SourceResponse,
+)
+from backend.database import (
+    DocumentRepository,
+    get_database_session,
 )
 
 logger = logging.getLogger(__name__)
@@ -47,6 +54,48 @@ def health() -> HealthResponse:
         status="ok",
         service="homelab-ai",
     )
+
+
+@router.get(
+    "/documents",
+    response_model=list[DocumentResponse],
+    tags=["documents"],
+    status_code=status.HTTP_200_OK,
+)
+def list_documents(
+    session: Annotated[
+        Session,
+        Depends(get_database_session),
+    ],
+    offset: Annotated[
+        int,
+        Query(ge=0),
+    ] = 0,
+    limit: Annotated[
+        int,
+        Query(ge=1, le=1000),
+    ] = 100,
+) -> list[DocumentResponse]:
+    documents = DocumentRepository(session).list_all(
+        offset=offset,
+        limit=limit,
+    )
+
+    return [
+        DocumentResponse(
+            id=document.id,
+            filename=document.filename,
+            content_type=document.content_type,
+            size_bytes=document.size_bytes,
+            checksum_sha256=document.checksum_sha256,
+            status=document.status.value,
+            chunk_count=document.chunk_count,
+            error_message=document.error_message,
+            created_at=document.created_at,
+            updated_at=document.updated_at,
+        )
+        for document in documents
+    ]
 
 
 @router.post(
@@ -164,7 +213,9 @@ def evaluate(
             detail=str(exc),
         ) from exc
     except Exception as exc:
-        logger.exception("Unexpected error while running retrieval evaluation")
+        logger.exception(
+            "Unexpected error while running retrieval evaluation",
+        )
 
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -192,8 +243,12 @@ def evaluate(
         questions=[
             QuestionEvaluationResponse(
                 question=result.question,
-                relevant_documents=list(result.relevant_documents),
-                retrieved_documents=list(result.retrieved_documents),
+                relevant_documents=list(
+                    result.relevant_documents,
+                ),
+                retrieved_documents=list(
+                    result.retrieved_documents,
+                ),
                 hit_at_1=result.hit_at_1,
                 hit_at_5=result.hit_at_5,
                 precision_at_5=result.precision_at_5,
@@ -216,7 +271,9 @@ def evaluate(
 def ingest(
     file: Annotated[
         UploadFile,
-        File(description=("Text, Markdown, or text-based PDF document.")),
+        File(
+            description=("Text, Markdown, or text-based PDF document."),
+        ),
     ],
     rag_service: Annotated[
         HomelabRAGService,
@@ -226,7 +283,9 @@ def ingest(
     filename = file.filename or ""
 
     try:
-        content = file.file.read(rag_service.max_upload_bytes + 1)
+        content = file.file.read(
+            rag_service.max_upload_bytes + 1,
+        )
 
         result = rag_service.ingest_document(
             filename=filename,
@@ -260,7 +319,9 @@ def ingest(
             detail=str(exc),
         ) from exc
     except Exception as exc:
-        logger.exception("Unexpected document ingestion error")
+        logger.exception(
+            "Unexpected document ingestion error",
+        )
 
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

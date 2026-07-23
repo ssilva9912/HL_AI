@@ -35,6 +35,15 @@ def _validate_pagination(offset: int, limit: int) -> None:
         raise ValueError("Pagination limit must be between 1 and 1000.")
 
 
+def _normalize_content_type(content_type: str | None) -> str | None:
+    if content_type is None:
+        return None
+
+    normalized_content_type = content_type.strip()
+
+    return normalized_content_type or None
+
+
 class DocumentRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
@@ -63,12 +72,38 @@ class DocumentRepository:
         document = Document(
             filename=normalized_filename,
             storage_path=normalized_storage_path,
-            content_type=content_type,
+            content_type=_normalize_content_type(content_type),
             size_bytes=size_bytes,
             checksum_sha256=_validate_sha256(checksum_sha256),
         )
 
         self._session.add(document)
+        self._session.flush()
+
+        return document
+
+    def update_content(
+        self,
+        document: Document,
+        *,
+        filename: str,
+        content_type: str | None,
+        size_bytes: int,
+        checksum_sha256: str,
+    ) -> Document:
+        normalized_filename = filename.strip()
+
+        if not normalized_filename:
+            raise ValueError("Document filename cannot be empty.")
+
+        if size_bytes < 0:
+            raise ValueError("Document size cannot be negative.")
+
+        document.filename = normalized_filename
+        document.content_type = _normalize_content_type(content_type)
+        document.size_bytes = size_bytes
+        document.checksum_sha256 = _validate_sha256(checksum_sha256)
+
         self._session.flush()
 
         return document

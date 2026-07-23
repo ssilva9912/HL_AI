@@ -1,3 +1,6 @@
+from datetime import datetime
+from uuid import UUID
+
 from pydantic import BaseModel, Field
 
 
@@ -76,6 +79,19 @@ class IngestResponse(BaseModel):
     document_count: int
     chunk_count: int
     status: str
+
+
+class DocumentResponse(BaseModel):
+    id: UUID
+    filename: str
+    content_type: str | None
+    size_bytes: int
+    checksum_sha256: str
+    status: str
+    chunk_count: int
+    error_message: str | None
+    created_at: datetime
+    updated_at: datetime
 
 
 class HealthResponse(BaseModel):
