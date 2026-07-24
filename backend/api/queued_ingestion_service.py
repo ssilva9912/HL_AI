@@ -1,3 +1,4 @@
+import logging
 import mimetypes
 from collections.abc import Callable
 from pathlib import Path
@@ -20,6 +21,11 @@ from backend.database import (
     QueuedIngestion,
     QueuedIngestionWorker,
 )
+from backend.database.ingestion_recovery import (
+    IngestionRecovery,
+)
+
+logger = logging.getLogger(__name__)
 
 SessionFactory = Callable[[], Session]
 
@@ -49,6 +55,9 @@ class QueuedDocumentIngestionService:
         self._worker = QueuedIngestionWorker(
             session_factory=session_factory,
             process_document=self._process_document,
+        )
+        self._recovery = IngestionRecovery(
+            session_factory=session_factory,
         )
 
         self._worker_lock = Lock()
@@ -85,6 +94,20 @@ class QueuedDocumentIngestionService:
     ) -> None:
         with self._worker_lock:
             self._worker.process(job_id)
+
+    def recover_pending_jobs(self) -> int:
+        job_ids = self._recovery.prepare()
+
+        for job_id in job_ids:
+            try:
+                self.process_job(job_id)
+            except Exception:
+                logger.exception(
+                    "Recovered ingestion job failed job_id=%s",
+                    job_id,
+                )
+
+        return len(job_ids)
 
     def _process_document(
         self,
