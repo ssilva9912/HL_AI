@@ -24,6 +24,10 @@ from backend.database import (
 from backend.database.ingestion_recovery import (
     IngestionRecovery,
 )
+from backend.database.ingestion_retry import (
+    IngestionRetry,
+    RetriedIngestion,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +63,9 @@ class QueuedDocumentIngestionService:
         self._recovery = IngestionRecovery(
             session_factory=session_factory,
         )
+        self._retry = IngestionRetry(
+            session_factory=session_factory,
+        )
 
         self._worker_lock = Lock()
 
@@ -86,6 +93,14 @@ class QueuedDocumentIngestionService:
             final_storage_path=(self._settings.document_directory / normalized_filename),
             content_type=content_type,
             content=content,
+        )
+
+    def retry_job(
+        self,
+        job_id: UUID,
+    ) -> RetriedIngestion:
+        return self._retry.retry(
+            job_id,
         )
 
     def process_job(

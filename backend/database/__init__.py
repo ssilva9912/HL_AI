@@ -1,3 +1,6 @@
+from backend.database.active_job_index import (
+    active_ingestion_job_index,
+)
 from backend.database.base import Base
 from backend.database.ingestion_lifecycle import (
     IngestionHandle,
@@ -52,6 +55,7 @@ __all__ = [
     "IngestionQueue",
     "QueuedIngestion",
     "QueuedIngestionWorker",
+    "active_ingestion_job_index",
     "check_database_connection",
     "get_database_session",
     "get_engine",

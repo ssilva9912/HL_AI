@@ -14,6 +14,15 @@ class QueuedIngestionResponse(BaseModel):
     status_url: str
 
 
+class RetriedIngestionResponse(BaseModel):
+    source_job_id: UUID
+    document_id: UUID
+    job_id: UUID
+    operation: str
+    status: str
+    status_url: str
+
+
 class IngestionJobResponse(BaseModel):
     id: UUID
     document_id: UUID

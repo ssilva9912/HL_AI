@@ -4,9 +4,15 @@ from hashlib import sha256
 from pathlib import Path
 from uuid import UUID
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from backend.database.active_ingestion import (
+    ActiveIngestionJobError,
+    get_active_ingestion_job,
+)
 from backend.database.models import (
+    IngestionJobStatus,
     IngestionOperation,
 )
 from backend.database.payload_repository import (
@@ -28,6 +34,8 @@ class QueuedIngestion:
     staged_path: Path
     checksum_sha256: str
     size_bytes: int
+    status: IngestionJobStatus = IngestionJobStatus.QUEUED
+    is_new_job: bool = True
 
 
 class IngestionQueue:
@@ -36,7 +44,7 @@ class IngestionQueue:
 
     The database transaction and staged file are treated as one logical
     operation. If either database persistence or file staging fails, the
-    staged files are removed and the the database transaction rolls back.
+    staged files are removed and the database transaction rolls back.
     """
 
     def __init__(
@@ -77,6 +85,7 @@ class IngestionQueue:
 
         temporary_path: Path | None = None
         staged_path: Path | None = None
+        document_id: UUID | None = None
 
         try:
             with self._session_factory() as session:
@@ -103,7 +112,42 @@ class IngestionQueue:
                         )
                         operation = IngestionOperation.INDEX
                     else:
+                        active_job = get_active_ingestion_job(
+                            session,
+                            document.id,
+                        )
+
+                        if active_job is not None:
+                            active_payload = payloads.get(
+                                active_job.id,
+                            )
+
+                            if (
+                                active_payload is not None
+                                and active_payload.size_bytes == len(content)
+                                and active_payload.checksum_sha256 == checksum_sha256
+                            ):
+                                return QueuedIngestion(
+                                    document_id=document.id,
+                                    job_id=active_job.id,
+                                    operation=active_job.operation,
+                                    staged_path=Path(
+                                        active_payload.staged_path,
+                                    ),
+                                    checksum_sha256=(active_payload.checksum_sha256),
+                                    size_bytes=active_payload.size_bytes,
+                                    status=active_job.status,
+                                    is_new_job=False,
+                                )
+
+                            raise ActiveIngestionJobError(
+                                document_id=document.id,
+                                job_id=active_job.id,
+                            )
+
                         operation = IngestionOperation.REINDEX
+
+                    document_id = document.id
 
                     job = jobs.create(
                         document_id=document.id,
@@ -139,6 +183,32 @@ class IngestionQueue:
                     )
 
             return queued_ingestion
+
+        except IntegrityError as error:
+            if temporary_path is not None:
+                temporary_path.unlink(
+                    missing_ok=True,
+                )
+
+            if staged_path is not None:
+                staged_path.unlink(
+                    missing_ok=True,
+                )
+
+            if document_id is not None:
+                with self._session_factory() as session:
+                    active_job = get_active_ingestion_job(
+                        session,
+                        document_id,
+                    )
+
+                    if active_job is not None:
+                        raise ActiveIngestionJobError(
+                            document_id=document_id,
+                            job_id=active_job.id,
+                        ) from error
+
+            raise
 
         except Exception:
             if temporary_path is not None:

@@ -19,6 +19,7 @@ from backend.api.dependencies import (
 from backend.api.ingestion_schemas import (
     IngestionJobResponse,
     QueuedIngestionResponse,
+    RetriedIngestionResponse,
 )
 from backend.api.queued_ingestion_service import (
     QueuedDocumentIngestionService,
@@ -32,6 +33,14 @@ from backend.api.rag_service import (
 from backend.database import (
     IngestionJobRepository,
     get_database_session,
+)
+from backend.database.active_ingestion import (
+    ActiveIngestionJobError,
+)
+from backend.database.ingestion_retry import (
+    IngestionJobNotFoundError,
+    IngestionJobNotRetryableError,
+    IngestionPayloadUnavailableError,
 )
 
 logger = logging.getLogger(__name__)
@@ -89,6 +98,11 @@ def queue_document(
             status_code=status.HTTP_413_CONTENT_TOO_LARGE,
             detail=str(exc),
         ) from exc
+    except ActiveIngestionJobError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
     except RuntimeError as exc:
         logger.exception(
             "Queued ingestion is unavailable",
@@ -110,17 +124,25 @@ def queue_document(
     finally:
         file.file.close()
 
-    background_tasks.add_task(
-        ingestion_service.process_job,
-        queued.job_id,
-    )
+    if queued.is_new_job:
+        background_tasks.add_task(
+            ingestion_service.process_job,
+            queued.job_id,
+        )
 
-    logger.info(
-        "Document queued document=%s job_id=%s size_bytes=%d",
-        filename,
-        queued.job_id,
-        queued.size_bytes,
-    )
+        logger.info(
+            "Document queued document=%s job_id=%s size_bytes=%d",
+            filename,
+            queued.job_id,
+            queued.size_bytes,
+        )
+    else:
+        logger.info(
+            "Reused active ingestion job document=%s job_id=%s status=%s",
+            filename,
+            queued.job_id,
+            queued.status.value,
+        )
 
     return QueuedIngestionResponse(
         document=filename,
@@ -128,8 +150,72 @@ def queue_document(
         document_id=queued.document_id,
         job_id=queued.job_id,
         operation=queued.operation.value,
-        status="queued",
+        status=queued.status.value,
         status_url=(f"/ingestion-jobs/{queued.job_id}"),
+    )
+
+
+@router.post(
+    "/ingestion-jobs/{job_id}/retry",
+    response_model=RetriedIngestionResponse,
+    tags=["ingestion"],
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def retry_ingestion_job(
+    job_id: UUID,
+    background_tasks: BackgroundTasks,
+    ingestion_service: Annotated[
+        QueuedDocumentIngestionService,
+        Depends(get_queued_ingestion_service),
+    ],
+) -> RetriedIngestionResponse:
+    try:
+        retried = ingestion_service.retry_job(
+            job_id,
+        )
+    except IngestionJobNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except (
+        IngestionJobNotRetryableError,
+        IngestionPayloadUnavailableError,
+        ActiveIngestionJobError,
+    ) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+    except Exception as exc:
+        logger.exception(
+            "Unexpected ingestion retry error job_id=%s",
+            job_id,
+        )
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="The ingestion job could not be retried.",
+        ) from exc
+
+    background_tasks.add_task(
+        ingestion_service.process_job,
+        retried.job_id,
+    )
+
+    logger.info(
+        "Ingestion job retried source_job_id=%s job_id=%s",
+        retried.source_job_id,
+        retried.job_id,
+    )
+
+    return RetriedIngestionResponse(
+        source_job_id=retried.source_job_id,
+        document_id=retried.document_id,
+        job_id=retried.job_id,
+        operation=retried.operation.value,
+        status="queued",
+        status_url=(f"/ingestion-jobs/{retried.job_id}"),
     )
 
 
