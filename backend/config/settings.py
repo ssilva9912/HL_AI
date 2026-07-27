@@ -1,7 +1,8 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Self
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -47,6 +48,25 @@ class Settings(BaseSettings):
     embedding_timeout: float = Field(
         default=30.0,
         gt=0,
+    )
+    embedding_batch_size: int = Field(
+        default=32,
+        ge=1,
+        le=256,
+        description=("Number of chunks sent to Ollama in one embedding request."),
+    )
+
+    document_chunk_size: int = Field(
+        default=1_200,
+        ge=100,
+        le=8_000,
+        description=("Maximum character length of an indexed document chunk."),
+    )
+
+    document_chunk_overlap: int = Field(
+        default=120,
+        ge=0,
+        description=("Character overlap retained between adjacent document chunks."),
     )
 
     default_top_k: int = Field(
@@ -108,6 +128,14 @@ class Settings(BaseSettings):
         default=False,
         description=("Log generated SQL statements. Keep disabled outside local debugging."),
     )
+
+    @model_validator(mode="after")
+    def validate_chunking(self) -> Self:
+        if self.document_chunk_overlap >= self.document_chunk_size:
+            raise ValueError(
+                "document_chunk_overlap must be smaller than document_chunk_size",
+            )
+        return self
 
 
 @lru_cache(maxsize=1)
