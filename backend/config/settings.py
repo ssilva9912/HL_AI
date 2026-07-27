@@ -70,6 +70,24 @@ class Settings(BaseSettings):
         description=("Directory containing uploads awaiting ingestion."),
     )
 
+    abandoned_ingestion_job_seconds: int = Field(
+        default=60 * 60,
+        ge=60,
+        description=("Age after which an inactive queued or running job is failed."),
+    )
+
+    failed_payload_retention_seconds: int = Field(
+        default=7 * 24 * 60 * 60,
+        ge=0,
+        description=("How long failed staged uploads remain available for retry."),
+    )
+
+    orphan_staging_file_grace_seconds: int = Field(
+        default=60 * 60,
+        ge=0,
+        description=("Minimum age before an unreferenced staging file is removed."),
+    )
+
     vector_store_path: Path = Field(
         default=DATA_DIR / "index" / "qdrant",
         description=("Directory containing the persistent local Qdrant database."),

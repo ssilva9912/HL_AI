@@ -188,6 +188,9 @@ class QueuedIngestionWorker:
             with session.begin():
                 documents = DocumentRepository(session)
                 jobs = IngestionJobRepository(session)
+                payloads = IngestionPayloadRepository(
+                    session,
+                )
 
                 document = documents.get(
                     claimed.document_id,
@@ -223,6 +226,10 @@ class QueuedIngestionWorker:
                     total_chunks=chunk_count,
                 )
                 jobs.mark_succeeded(job)
+
+                payload = payloads.get(job.id)
+                if payload is not None:
+                    payloads.delete(payload)
 
     def _record_failure(
         self,

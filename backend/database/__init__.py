@@ -2,6 +2,10 @@ from backend.database.active_job_index import (
     active_ingestion_job_index,
 )
 from backend.database.base import Base
+from backend.database.ingestion_cleanup import (
+    IngestionCleanup,
+    IngestionCleanupResult,
+)
 from backend.database.ingestion_lifecycle import (
     IngestionHandle,
     IngestionLifecycle,
@@ -45,6 +49,8 @@ __all__ = [
     "DocumentRepository",
     "DocumentStatus",
     "IngestionHandle",
+    "IngestionCleanup",
+    "IngestionCleanupResult",
     "IngestionJob",
     "IngestionJobRepository",
     "IngestionJobStatus",

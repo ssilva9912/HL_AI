@@ -1,6 +1,7 @@
 import logging
 import mimetypes
 from collections.abc import Callable
+from datetime import timedelta
 from pathlib import Path
 from threading import Lock
 from uuid import UUID
@@ -20,6 +21,9 @@ from backend.database import (
     IngestionQueue,
     QueuedIngestion,
     QueuedIngestionWorker,
+)
+from backend.database.ingestion_cleanup import (
+    IngestionCleanup,
 )
 from backend.database.ingestion_recovery import (
     IngestionRecovery,
@@ -62,6 +66,19 @@ class QueuedDocumentIngestionService:
         )
         self._recovery = IngestionRecovery(
             session_factory=session_factory,
+        )
+        self._cleanup = IngestionCleanup(
+            session_factory=session_factory,
+            staging_directory=settings.staging_directory,
+            abandoned_job_age=timedelta(
+                seconds=settings.abandoned_ingestion_job_seconds,
+            ),
+            failed_payload_retention=timedelta(
+                seconds=settings.failed_payload_retention_seconds,
+            ),
+            orphan_file_grace_period=timedelta(
+                seconds=settings.orphan_staging_file_grace_seconds,
+            ),
         )
         self._retry = IngestionRetry(
             session_factory=session_factory,
@@ -111,6 +128,24 @@ class QueuedDocumentIngestionService:
             self._worker.process(job_id)
 
     def recover_pending_jobs(self) -> int:
+        cleanup = self._cleanup.run()
+        if any(
+            (
+                cleanup.abandoned_jobs,
+                cleanup.unrecoverable_jobs,
+                cleanup.removed_payloads,
+                cleanup.removed_orphaned_files,
+            ),
+        ):
+            logger.info(
+                "Ingestion cleanup finished abandoned=%d unrecoverable=%d "
+                "payloads=%d orphaned_files=%d",
+                cleanup.abandoned_jobs,
+                cleanup.unrecoverable_jobs,
+                cleanup.removed_payloads,
+                cleanup.removed_orphaned_files,
+            )
+
         job_ids = self._recovery.prepare()
 
         for job_id in job_ids:

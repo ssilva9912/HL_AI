@@ -83,7 +83,7 @@ def test_worker_processes_queued_document(
 
         assert document is not None
         assert job is not None
-        assert payload is not None
+        assert payload is None
 
         assert document.status is DocumentStatus.READY
         assert document.chunk_count == 3
