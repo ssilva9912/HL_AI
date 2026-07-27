@@ -78,6 +78,41 @@ class UploadResult:
 
 
 @dataclass(frozen=True)
+class QueuedUpload:
+    document: str
+    size_bytes: int
+    document_id: str
+    job_id: str
+    operation: str
+    status: str
+    status_url: str
+
+
+@dataclass(frozen=True)
+class IngestionJob:
+    id: str
+    document_id: str
+    operation: str
+    status: str
+    stage: str
+    attempt_count: int
+    processed_chunks: int
+    total_chunks: int | None
+    error_message: str | None
+
+
+@dataclass(frozen=True)
+class Document:
+    id: str
+    filename: str
+    content_type: str | None
+    size_bytes: int
+    status: str
+    chunk_count: int
+    error_message: str | None
+
+
+@dataclass(frozen=True)
 class EvaluationMetrics:
     question_count: int
     hit_at_1: float
@@ -276,6 +311,131 @@ class HomelabAPIClient:
                 )
             ),
         )
+
+    def queue_document(
+        self,
+        filename: str,
+        content: bytes,
+        content_type: str | None = None,
+    ) -> QueuedUpload:
+        cleaned_filename = filename.strip()
+        if not cleaned_filename:
+            raise ValueError("The uploaded file must have a filename.")
+        if not content:
+            raise ValueError("The uploaded file is empty.")
+
+        response = self._request(
+            method="POST",
+            path="/documents",
+            files={
+                "file": (
+                    cleaned_filename,
+                    content,
+                    content_type or "application/octet-stream",
+                ),
+            },
+        )
+
+        return QueuedUpload(
+            document=str(response.get("document", cleaned_filename)),
+            size_bytes=int(response.get("size_bytes", len(content))),
+            document_id=str(response.get("document_id", "")),
+            job_id=str(response.get("job_id", "")),
+            operation=str(response.get("operation", "index")),
+            status=str(response.get("status", "queued")),
+            status_url=str(
+                response.get(
+                    "status_url",
+                    f"/ingestion-jobs/{response.get('job_id', '')}",
+                ),
+            ),
+        )
+
+    def get_ingestion_job(
+        self,
+        job_id: str,
+    ) -> IngestionJob:
+        response = self._request(
+            method="GET",
+            path=f"/ingestion-jobs/{job_id}",
+        )
+        total_chunks = response.get("total_chunks")
+        error_message = response.get("error_message")
+        return IngestionJob(
+            id=str(response.get("id", job_id)),
+            document_id=str(response.get("document_id", "")),
+            operation=str(response.get("operation", "index")),
+            status=str(response.get("status", "unknown")),
+            stage=str(response.get("stage", response.get("status", "unknown"))),
+            attempt_count=int(response.get("attempt_count", 0)),
+            processed_chunks=int(response.get("processed_chunks", 0)),
+            total_chunks=(int(total_chunks) if total_chunks is not None else None),
+            error_message=(str(error_message) if error_message is not None else None),
+        )
+
+    def retry_ingestion_job(
+        self,
+        job_id: str,
+    ) -> QueuedUpload:
+        response = self._request(
+            method="POST",
+            path=f"/ingestion-jobs/{job_id}/retry",
+        )
+        retry_job_id = str(response.get("job_id", ""))
+        return QueuedUpload(
+            document="",
+            size_bytes=0,
+            document_id=str(response.get("document_id", "")),
+            job_id=retry_job_id,
+            operation=str(response.get("operation", "index")),
+            status=str(response.get("status", "queued")),
+            status_url=str(
+                response.get(
+                    "status_url",
+                    f"/ingestion-jobs/{retry_job_id}",
+                ),
+            ),
+        )
+
+    def list_documents(self) -> list[Document]:
+        url = f"{self.base_url}/documents"
+        try:
+            with httpx.Client(timeout=self.timeout) as client:
+                response = client.get(url)
+                response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise HomelabAPIError(f"Could not load the document library: {exc}") from exc
+
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise HomelabAPIError(
+                "The backend returned an invalid document library response.",
+            ) from exc
+
+        if not isinstance(payload, list):
+            raise HomelabAPIError(
+                "The backend returned an unexpected document library response.",
+            )
+
+        documents: list[Document] = []
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            error_message = item.get("error_message")
+            content_type = item.get("content_type")
+            documents.append(
+                Document(
+                    id=str(item.get("id", "")),
+                    filename=str(item.get("filename", "")),
+                    content_type=(str(content_type) if content_type is not None else None),
+                    size_bytes=int(item.get("size_bytes", 0)),
+                    status=str(item.get("status", "unknown")),
+                    chunk_count=int(item.get("chunk_count", 0)),
+                    error_message=(str(error_message) if error_message is not None else None),
+                ),
+            )
+        return documents
 
     def evaluate(
         self,

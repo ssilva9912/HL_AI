@@ -102,6 +102,7 @@ def test_get_ingestion_job_returns_progress(
     assert payload["document_id"] == str(document_id)
     assert payload["operation"] == "index"
     assert payload["status"] == "running"
+    assert payload["stage"] == "parsing"
     assert payload["attempt_count"] == 1
     assert payload["processed_chunks"] == 2
     assert payload["total_chunks"] == 4

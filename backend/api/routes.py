@@ -77,6 +77,7 @@ def _ingestion_job_response(
         document_id=job.document_id,
         operation=job.operation.value,
         status=job.status.value,
+        stage=job.stage.value,
         attempt_count=job.attempt_count,
         processed_chunks=job.processed_chunks,
         total_chunks=job.total_chunks,

@@ -21,6 +21,7 @@ from backend.database.models import (
     IngestionJobStatus,
     IngestionOperation,
     IngestionPayload,
+    IngestionStage,
 )
 from backend.database.payload_repository import (
     IngestionPayloadRepository,
@@ -54,6 +55,7 @@ __all__ = [
     "IngestionJob",
     "IngestionJobRepository",
     "IngestionJobStatus",
+    "IngestionStage",
     "IngestionLifecycle",
     "IngestionOperation",
     "IngestionPayload",

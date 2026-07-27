@@ -1,6 +1,7 @@
 import logging
 import mimetypes
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from pathlib import Path
 from threading import Lock
@@ -85,6 +86,10 @@ class QueuedDocumentIngestionService:
         )
 
         self._worker_lock = Lock()
+        self._executor = ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix="hlai-ingestion",
+        )
 
     @property
     def max_upload_bytes(self) -> int:
@@ -127,6 +132,27 @@ class QueuedDocumentIngestionService:
         with self._worker_lock:
             self._worker.process(job_id)
 
+    def submit_job(
+        self,
+        job_id: UUID,
+    ) -> None:
+        self._executor.submit(
+            self._process_submitted_job,
+            job_id,
+        )
+
+    def _process_submitted_job(
+        self,
+        job_id: UUID,
+    ) -> None:
+        try:
+            self.process_job(job_id)
+        except Exception:
+            logger.exception(
+                "Submitted ingestion job failed job_id=%s",
+                job_id,
+            )
+
     def recover_pending_jobs(self) -> int:
         cleanup = self._cleanup.run()
         if any(
@@ -163,11 +189,13 @@ class QueuedDocumentIngestionService:
         self,
         filename: str,
         content: bytes,
+        progress_callback: Callable[[str, int, int | None], None],
     ) -> int:
         result = self._rag_service.ingest_document(
             filename=filename,
             content=content,
             track_ingestion=False,
+            progress_callback=progress_callback,
         )
 
         if result.document_chunk_count is None:

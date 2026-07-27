@@ -46,6 +46,7 @@ DEFAULT_EVALUATION_DATASET = Path(
 )
 
 IndexerFactory = Callable[[], Indexer]
+IngestionProgress = Callable[[str, int, int | None], None]
 
 
 class InvalidDocumentNameError(ValueError):
@@ -330,6 +331,7 @@ class HomelabRAGService:
         content: bytes,
         *,
         track_ingestion: bool = True,
+        progress_callback: IngestionProgress | None = None,
     ) -> IngestionResult:
         normalized_filename = filename.strip()
 
@@ -449,6 +451,7 @@ class HomelabRAGService:
             previous_corpus=previous_corpus,
             previous_document_chunks=(previous_document_chunks),
             ingestion_handle=ingestion_handle,
+            progress_callback=progress_callback,
         )
 
     def delete_document(
@@ -610,6 +613,7 @@ class HomelabRAGService:
         previous_corpus: IndexedCorpus | None,
         previous_document_chunks: list[EmbeddedChunk],
         ingestion_handle: IngestionHandle | None,
+        progress_callback: IngestionProgress | None,
     ) -> IngestionResult:
         destination.write_bytes(content)
 
@@ -618,9 +622,32 @@ class HomelabRAGService:
         vector_store_touched = False
 
         try:
+            if progress_callback is not None:
+                progress_callback("parsing", 0, None)
+
             staged_corpus = Indexer(
                 embedder=self._create_embedder(),
-            ).index_file(destination)
+            ).index_file(
+                destination,
+                on_embedding=(
+                    (
+                        lambda total: progress_callback(
+                            "embedding",
+                            0,
+                            total,
+                        )
+                    )
+                    if progress_callback is not None
+                    else None
+                ),
+            )
+
+            if progress_callback is not None:
+                progress_callback(
+                    "indexing",
+                    staged_corpus.chunk_count,
+                    staged_corpus.chunk_count,
+                )
 
             vector_store = self._get_vector_store()
             vector_store_touched = True

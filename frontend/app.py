@@ -1,3 +1,4 @@
+import time
 from typing import Any
 
 import streamlit as st
@@ -5,8 +6,9 @@ from api import (
     EvaluationResult,
     HomelabAPIClient,
     HomelabAPIError,
+    IngestionJob,
+    QueuedUpload,
     SearchResult,
-    UploadResult,
     get_api_url,
     get_default_top_k,
 )
@@ -25,8 +27,8 @@ def initialize_session_state() -> None:
     if "evaluation_result" not in st.session_state:
         st.session_state.evaluation_result = None
 
-    if "upload_results" not in st.session_state:
-        st.session_state.upload_results = []
+    if "ingestion_results" not in st.session_state:
+        st.session_state.ingestion_results = []
 
 
 def get_api_client() -> HomelabAPIClient:
@@ -269,7 +271,9 @@ def render_documents_tab(
     client: HomelabAPIClient,
 ) -> None:
     st.subheader("Documents")
-    st.caption("Upload documents to data/documents and index them immediately.")
+    st.caption(
+        "Queue documents for durable background parsing, embedding, and indexing.",
+    )
 
     uploaded_files = st.file_uploader(
         label="Choose documents",
@@ -289,111 +293,204 @@ def render_documents_tab(
             st.caption(f"{uploaded_file.name} ({uploaded_file.size:,} bytes)")
 
     upload_clicked = st.button(
-        "Upload and index",
+        "Queue uploads",
         type="primary",
         use_container_width=True,
         disabled=not uploaded_files,
     )
 
     if upload_clicked:
-        upload_results: list[UploadResult] = []
-        failures: list[str] = []
+        results: list[tuple[str, IngestionJob]] = []
+        submission_failures = 0
         total_files = len(uploaded_files)
 
         with st.status(
-            "Uploading and indexing documents...",
+            "Processing queued documents...",
             expanded=True,
-        ) as upload_status:
+        ) as batch_status:
             for index, uploaded_file in enumerate(
                 uploaded_files,
                 start=1,
             ):
-                st.write(f"**{index}/{total_files}:** Indexing `{uploaded_file.name}`...")
+                st.write(
+                    f"**{index}/{total_files}:** Queuing `{uploaded_file.name}`...",
+                )
 
                 try:
-                    result = client.upload_document(
+                    queued = client.queue_document(
                         filename=uploaded_file.name,
                         content=uploaded_file.getvalue(),
                         content_type=uploaded_file.type,
+                    )
+                    job = poll_ingestion_job(
+                        client=client,
+                        queued=queued,
+                        document_name=uploaded_file.name,
                     )
                 except (
                     ValueError,
                     HomelabAPIError,
                 ) as exc:
-                    failure = f"{uploaded_file.name}: {exc}"
-                    failures.append(failure)
-                    st.error(failure)
+                    submission_failures += 1
+                    st.error(f"{uploaded_file.name}: {exc}")
                 else:
-                    upload_results.append(result)
-                    st.success(
-                        f"Indexed `{result.document}` "
-                        f"with {result.chunk_count} total "
-                        f"stored chunks."
-                    )
+                    results.append((uploaded_file.name, job))
 
-            if failures:
-                upload_status.update(
-                    label=(f"Document processing finished with {len(failures)} error(s)."),
+            failed_count = sum(job.status == "failed" for _, job in results)
+            total_failures = failed_count + submission_failures
+            if total_failures:
+                batch_status.update(
+                    label=(f"Document processing finished with {total_failures} error(s)."),
                     state="error",
                     expanded=True,
                 )
             else:
-                upload_status.update(
-                    label=(f"Successfully indexed {len(upload_results)} document(s)."),
+                batch_status.update(
+                    label=(f"Successfully indexed {len(results)} document(s)."),
                     state="complete",
                     expanded=False,
                 )
 
-        st.session_state.upload_results = upload_results
+        st.session_state.ingestion_results = results
 
-        if upload_results:
-            st.success(f"Uploaded and indexed {len(upload_results)} document(s).")
+    if not upload_clicked and not st.session_state.ingestion_results:
+        st.info("Select one or more documents, then click Queue uploads.")
 
-    upload_results = st.session_state.upload_results
+    render_ingestion_results(client)
+    render_document_library(client)
 
-    if not upload_results:
-        if not upload_clicked:
-            st.info("Select one or more documents, then click Upload and index.")
 
+def poll_ingestion_job(
+    *,
+    client: HomelabAPIClient,
+    queued: QueuedUpload,
+    document_name: str,
+    timeout_seconds: float = 900.0,
+) -> IngestionJob:
+    stage_progress = {
+        "queued": 0.05,
+        "parsing": 0.25,
+        "embedding": 0.60,
+        "indexing": 0.85,
+        "succeeded": 1.0,
+        "failed": 1.0,
+    }
+    progress = st.progress(0.0, text=f"`{document_name}` queued")
+    deadline = time.monotonic() + timeout_seconds
+
+    while True:
+        job = client.get_ingestion_job(queued.job_id)
+        total = job.total_chunks
+        chunk_text = f" · {job.processed_chunks}/{total} chunks" if total is not None else ""
+        progress.progress(
+            stage_progress.get(job.stage, 0.05),
+            text=f"`{document_name}` — {job.stage}{chunk_text}",
+        )
+
+        if job.status == "succeeded":
+            st.success(
+                f"Indexed `{document_name}` with {job.processed_chunks} chunk(s).",
+            )
+            return job
+
+        if job.status == "failed":
+            st.error(
+                f"`{document_name}` failed: {job.error_message or 'Unknown ingestion error.'}",
+            )
+            return job
+
+        if time.monotonic() >= deadline:
+            raise HomelabAPIError(
+                f"Timed out waiting for `{document_name}`. The durable job may still be running.",
+            )
+
+        time.sleep(0.5)
+
+
+def render_ingestion_results(
+    client: HomelabAPIClient,
+) -> None:
+    results: list[tuple[str, IngestionJob]] = st.session_state.ingestion_results
+    if not results:
         return
 
     st.divider()
-    st.markdown("### Latest upload results")
-
-    rows = [
-        {
-            "Document": result.document,
-            "Size": result.size_bytes,
-            "Documents indexed": result.document_count,
-            "Chunks indexed": result.chunk_count,
-            "Status": result.status,
-        }
-        for result in upload_results
-    ]
-
+    st.markdown("### Latest ingestion jobs")
     st.dataframe(
-        rows,
+        [
+            {
+                "Document": name,
+                "Status": job.status,
+                "Stage": job.stage,
+                "Attempt": job.attempt_count,
+                "Chunks": (
+                    f"{job.processed_chunks}/{job.total_chunks}"
+                    if job.total_chunks is not None
+                    else str(job.processed_chunks)
+                ),
+                "Error": job.error_message or "",
+            }
+            for name, job in results
+        ],
         use_container_width=True,
         hide_index=True,
-        column_config={
-            "Size": st.column_config.NumberColumn(
-                label="Size (bytes)",
-                format="%d",
-            ),
-            "Documents indexed": (
-                st.column_config.NumberColumn(
-                    format="%d",
-                )
-            ),
-            "Chunks indexed": (
-                st.column_config.NumberColumn(
-                    format="%d",
-                )
-            ),
-        },
     )
 
-    st.success("The uploaded documents are now available in the Chat tab.")
+    for name, job in results:
+        if job.status != "failed":
+            continue
+        if st.button(
+            f"Retry {name}",
+            key=f"retry-{job.id}",
+            use_container_width=True,
+        ):
+            try:
+                queued = client.retry_ingestion_job(job.id)
+                retried = poll_ingestion_job(
+                    client=client,
+                    queued=queued,
+                    document_name=name,
+                )
+            except HomelabAPIError as exc:
+                st.error(f"Retry failed: {exc}")
+            else:
+                st.session_state.ingestion_results = [
+                    (existing_name, retried if existing_job.id == job.id else existing_job)
+                    for existing_name, existing_job in results
+                ]
+                st.rerun()
+
+
+def render_document_library(
+    client: HomelabAPIClient,
+) -> None:
+    st.divider()
+    st.markdown("### Document library")
+    try:
+        documents = client.list_documents()
+    except HomelabAPIError as exc:
+        st.warning(str(exc))
+        return
+
+    if not documents:
+        st.info("No documents have been indexed yet.")
+        return
+
+    st.dataframe(
+        [
+            {
+                "Document": document.filename,
+                "Type": document.content_type or "",
+                "Size (bytes)": document.size_bytes,
+                "Status": document.status,
+                "Chunks": document.chunk_count,
+                "Error": document.error_message or "",
+            }
+            for document in documents
+        ],
+        use_container_width=True,
+        hide_index=True,
+    )
 
 
 def render_evaluation_tab(

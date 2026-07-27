@@ -126,7 +126,7 @@ def queue_document(
 
     if queued.is_new_job:
         background_tasks.add_task(
-            ingestion_service.process_job,
+            ingestion_service.submit_job,
             queued.job_id,
         )
 
@@ -199,7 +199,7 @@ def retry_ingestion_job(
         ) from exc
 
     background_tasks.add_task(
-        ingestion_service.process_job,
+        ingestion_service.submit_job,
         retried.job_id,
     )
 
@@ -245,6 +245,7 @@ def get_ingestion_job(
         document_id=job.document_id,
         operation=job.operation.value,
         status=job.status.value,
+        stage=job.stage.value,
         attempt_count=job.attempt_count,
         processed_chunks=job.processed_chunks,
         total_chunks=job.total_chunks,

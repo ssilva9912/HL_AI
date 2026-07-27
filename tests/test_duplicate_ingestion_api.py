@@ -42,7 +42,7 @@ class FakeDuplicateService:
             is_new_job=False,
         )
 
-    def process_job(
+    def submit_job(
         self,
         job_id: UUID,
     ) -> None:
