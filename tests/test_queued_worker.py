@@ -1,4 +1,4 @@
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -14,6 +14,7 @@ from backend.database import (
     IngestionJobStatus,
     IngestionPayloadRepository,
     IngestionQueue,
+    IngestionStage,
     QueuedIngestionWorker,
 )
 
@@ -55,7 +56,18 @@ def test_worker_processes_queued_document(
         content=content,
     )
 
-    processor = Mock(return_value=3)
+    def process_document(
+        filename: str,
+        uploaded_content: bytes,
+        progress: Callable[[str, int, int | None], None],
+    ) -> int:
+        assert filename == "queued.txt"
+        assert uploaded_content == content
+        progress("embedding", 0, 3)
+        progress("indexing", 3, 3)
+        return 3
+
+    processor = Mock(side_effect=process_document)
 
     worker = QueuedIngestionWorker(
         session_factory=session_factory,
@@ -63,10 +75,7 @@ def test_worker_processes_queued_document(
     )
     worker.process(queued.job_id)
 
-    processor.assert_called_once_with(
-        "queued.txt",
-        content,
-    )
+    processor.assert_called_once()
 
     assert not queued.staged_path.exists()
 
@@ -83,13 +92,14 @@ def test_worker_processes_queued_document(
 
         assert document is not None
         assert job is not None
-        assert payload is not None
+        assert payload is None
 
         assert document.status is DocumentStatus.READY
         assert document.chunk_count == 3
         assert document.size_bytes == len(content)
 
         assert job.status is IngestionJobStatus.SUCCEEDED
+        assert job.stage is IngestionStage.SUCCEEDED
         assert job.attempt_count == 1
         assert job.processed_chunks == 3
         assert job.total_chunks == 3

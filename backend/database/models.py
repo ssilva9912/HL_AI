@@ -43,6 +43,15 @@ class IngestionJobStatus(StrEnum):
     FAILED = "failed"
 
 
+class IngestionStage(StrEnum):
+    QUEUED = "queued"
+    PARSING = "parsing"
+    EMBEDDING = "embedding"
+    INDEXING = "indexing"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+
+
 document_status_type = SqlEnum(
     DocumentStatus,
     name="document_status",
@@ -64,6 +73,15 @@ ingestion_operation_type = SqlEnum(
 ingestion_job_status_type = SqlEnum(
     IngestionJobStatus,
     name="ingestion_job_status",
+    native_enum=False,
+    create_constraint=True,
+    validate_strings=True,
+    values_callable=lambda enum_type: [member.value for member in enum_type],
+)
+
+ingestion_stage_type = SqlEnum(
+    IngestionStage,
+    name="ingestion_stage",
     native_enum=False,
     create_constraint=True,
     validate_strings=True,
@@ -205,6 +223,13 @@ class IngestionJob(Base):
         nullable=False,
         default=IngestionJobStatus.QUEUED,
         server_default=IngestionJobStatus.QUEUED.value,
+    )
+
+    stage: Mapped[IngestionStage] = mapped_column(
+        ingestion_stage_type,
+        nullable=False,
+        default=IngestionStage.QUEUED,
+        server_default=IngestionStage.QUEUED.value,
     )
 
     attempt_count: Mapped[int] = mapped_column(

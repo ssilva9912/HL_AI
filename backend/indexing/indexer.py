@@ -1,4 +1,4 @@
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from backend.embeddings.ollama_embedder import OllamaEmbedder
@@ -36,8 +36,13 @@ class Indexer:
     def index_file(
         self,
         path: Path,
+        *,
+        on_embedding: Callable[[int], None] | None = None,
     ) -> IndexedCorpus:
         processed = self._processor.process_file(path)
+
+        if on_embedding is not None:
+            on_embedding(len(processed.chunks))
 
         return self._embedding_pipeline.embed_processed_documents([processed])
 

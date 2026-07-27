@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from typing import Any
 
 import httpx
@@ -13,6 +14,7 @@ class OllamaEmbedder:
         base_url: str = "http://localhost:11434",
         timeout: float = 30.0,
         batch_size: int = 8,
+        progress_callback: Callable[[int, int], None] | None = None,
     ) -> None:
         if not model.strip():
             raise ValueError("model must not be empty")
@@ -30,6 +32,7 @@ class OllamaEmbedder:
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
         self._batch_size = batch_size
+        self._progress_callback = progress_callback
 
     def embed_text(
         self,
@@ -57,6 +60,7 @@ class OllamaEmbedder:
             return []
 
         embedded_chunks: list[EmbeddedChunk] = []
+        total_chunks = len(chunks)
 
         for start_index in range(
             0,
@@ -78,6 +82,12 @@ class OllamaEmbedder:
                     strict=True,
                 )
             )
+
+            if self._progress_callback is not None:
+                self._progress_callback(
+                    len(embedded_chunks),
+                    total_chunks,
+                )
 
         return embedded_chunks
 

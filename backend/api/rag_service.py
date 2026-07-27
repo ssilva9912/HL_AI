@@ -9,6 +9,7 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from backend.chunking.semantic_chunker import SemanticChunker
 from backend.config import Settings, get_settings
 from backend.database import (
     DocumentRepository,
@@ -46,6 +47,7 @@ DEFAULT_EVALUATION_DATASET = Path(
 )
 
 IndexerFactory = Callable[[], Indexer]
+IngestionProgress = Callable[[str, int, int | None], None]
 
 
 class InvalidDocumentNameError(ValueError):
@@ -161,11 +163,32 @@ class HomelabRAGService:
                 self._document_directory,
             )
 
-    def _create_embedder(self) -> OllamaEmbedder:
+    def _create_embedder(
+        self,
+        progress_callback: IngestionProgress | None = None,
+    ) -> OllamaEmbedder:
         return OllamaEmbedder(
             model=self._settings.embedding_model,
             base_url=self._settings.ollama_url,
             timeout=self._settings.embedding_timeout,
+            batch_size=self._settings.embedding_batch_size,
+            progress_callback=(
+                (
+                    lambda processed, total: progress_callback(
+                        "embedding",
+                        processed,
+                        total,
+                    )
+                )
+                if progress_callback is not None
+                else None
+            ),
+        )
+
+    def _create_chunker(self) -> SemanticChunker:
+        return SemanticChunker(
+            chunk_size=self._settings.document_chunk_size,
+            overlap=self._settings.document_chunk_overlap,
         )
 
     def _get_vector_store(
@@ -184,6 +207,7 @@ class HomelabRAGService:
             return self._indexer_factory()
 
         return Indexer(
+            chunker=self._create_chunker(),
             embedder=self._create_embedder(),
             vector_store=self._get_vector_store(),
         )
@@ -330,6 +354,7 @@ class HomelabRAGService:
         content: bytes,
         *,
         track_ingestion: bool = True,
+        progress_callback: IngestionProgress | None = None,
     ) -> IngestionResult:
         normalized_filename = filename.strip()
 
@@ -449,6 +474,7 @@ class HomelabRAGService:
             previous_corpus=previous_corpus,
             previous_document_chunks=(previous_document_chunks),
             ingestion_handle=ingestion_handle,
+            progress_callback=progress_callback,
         )
 
     def delete_document(
@@ -610,6 +636,7 @@ class HomelabRAGService:
         previous_corpus: IndexedCorpus | None,
         previous_document_chunks: list[EmbeddedChunk],
         ingestion_handle: IngestionHandle | None,
+        progress_callback: IngestionProgress | None,
     ) -> IngestionResult:
         destination.write_bytes(content)
 
@@ -618,9 +645,35 @@ class HomelabRAGService:
         vector_store_touched = False
 
         try:
+            if progress_callback is not None:
+                progress_callback("parsing", 0, None)
+
             staged_corpus = Indexer(
-                embedder=self._create_embedder(),
-            ).index_file(destination)
+                chunker=self._create_chunker(),
+                embedder=self._create_embedder(
+                    progress_callback,
+                ),
+            ).index_file(
+                destination,
+                on_embedding=(
+                    (
+                        lambda total: progress_callback(
+                            "embedding",
+                            0,
+                            total,
+                        )
+                    )
+                    if progress_callback is not None
+                    else None
+                ),
+            )
+
+            if progress_callback is not None:
+                progress_callback(
+                    "indexing",
+                    staged_corpus.chunk_count,
+                    staged_corpus.chunk_count,
+                )
 
             vector_store = self._get_vector_store()
             vector_store_touched = True

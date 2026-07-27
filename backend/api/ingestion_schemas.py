@@ -28,6 +28,7 @@ class IngestionJobResponse(BaseModel):
     document_id: UUID
     operation: str
     status: str
+    stage: str
     attempt_count: int
     processed_chunks: int
     total_chunks: int | None

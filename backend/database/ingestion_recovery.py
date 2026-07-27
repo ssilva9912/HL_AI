@@ -10,6 +10,7 @@ from backend.database.models import (
     IngestionJob,
     IngestionJobStatus,
     IngestionOperation,
+    IngestionStage,
 )
 from backend.database.payload_repository import (
     IngestionPayloadRepository,
@@ -107,6 +108,7 @@ class IngestionRecovery:
         job: IngestionJob,
     ) -> None:
         job.status = IngestionJobStatus.QUEUED
+        job.stage = IngestionStage.QUEUED
         job.processed_chunks = 0
         job.total_chunks = None
         job.error_message = None

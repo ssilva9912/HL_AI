@@ -45,7 +45,7 @@ class FakeQueuedIngestionService:
             size_bytes=len(content),
         )
 
-    def process_job(
+    def submit_job(
         self,
         job_id,
     ) -> None:

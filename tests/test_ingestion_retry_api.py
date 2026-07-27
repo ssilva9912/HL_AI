@@ -39,7 +39,7 @@ class FakeRetryService:
             operation=IngestionOperation.INDEX,
         )
 
-    def process_job(
+    def submit_job(
         self,
         job_id: UUID,
     ) -> None:

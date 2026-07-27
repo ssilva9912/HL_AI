@@ -11,6 +11,7 @@ from backend.database.models import (
     DocumentStatus,
     IngestionJobStatus,
     IngestionOperation,
+    IngestionStage,
 )
 from backend.database.payload_repository import (
     IngestionPayloadRepository,
@@ -23,7 +24,8 @@ from backend.database.repositories import (
 logger = logging.getLogger(__name__)
 
 SessionFactory = Callable[[], Session]
-DocumentProcessor = Callable[[str, bytes], int]
+ProgressCallback = Callable[[str, int, int | None], None]
+DocumentProcessor = Callable[[str, bytes, ProgressCallback], int]
 
 
 @dataclass(frozen=True)
@@ -68,6 +70,12 @@ class QueuedIngestionWorker:
             chunk_count = self._process_document(
                 claimed.filename,
                 content,
+                lambda stage, processed, total: self._update_stage(
+                    claimed.job_id,
+                    stage=stage,
+                    processed_chunks=processed,
+                    total_chunks=total,
+                ),
             )
 
             if chunk_count <= 0:
@@ -188,6 +196,9 @@ class QueuedIngestionWorker:
             with session.begin():
                 documents = DocumentRepository(session)
                 jobs = IngestionJobRepository(session)
+                payloads = IngestionPayloadRepository(
+                    session,
+                )
 
                 document = documents.get(
                     claimed.document_id,
@@ -223,6 +234,35 @@ class QueuedIngestionWorker:
                     total_chunks=chunk_count,
                 )
                 jobs.mark_succeeded(job)
+
+                payload = payloads.get(job.id)
+                if payload is not None:
+                    payloads.delete(payload)
+
+    def _update_stage(
+        self,
+        job_id: UUID,
+        *,
+        stage: str,
+        processed_chunks: int,
+        total_chunks: int | None,
+    ) -> None:
+        resolved_stage = IngestionStage(stage)
+
+        with self._session_factory() as session:
+            with session.begin():
+                jobs = IngestionJobRepository(session)
+                job = jobs.get(job_id)
+                if job is None:
+                    raise RuntimeError(
+                        "The progressing ingestion job no longer exists.",
+                    )
+                jobs.update_stage(
+                    job,
+                    resolved_stage,
+                    processed_chunks=processed_chunks,
+                    total_chunks=total_chunks,
+                )
 
     def _record_failure(
         self,

@@ -10,6 +10,7 @@ from backend.database.models import (
     IngestionJob,
     IngestionJobStatus,
     IngestionOperation,
+    IngestionStage,
 )
 
 
@@ -220,6 +221,7 @@ class IngestionJobRepository:
             raise ValueError("Total chunk count cannot be negative.")
 
         job.status = IngestionJobStatus.RUNNING
+        job.stage = IngestionStage.PARSING
         job.attempt_count += 1
         job.total_chunks = total_chunks
         job.processed_chunks = 0
@@ -228,6 +230,29 @@ class IngestionJobRepository:
         job.completed_at = None
 
         self._session.flush()
+
+        return job
+
+    def update_stage(
+        self,
+        job: IngestionJob,
+        stage: IngestionStage,
+        *,
+        processed_chunks: int | None = None,
+        total_chunks: int | None = None,
+    ) -> IngestionJob:
+        job.stage = stage
+
+        if processed_chunks is not None or total_chunks is not None:
+            self.update_progress(
+                job,
+                processed_chunks=(
+                    processed_chunks if processed_chunks is not None else job.processed_chunks
+                ),
+                total_chunks=total_chunks,
+            )
+        else:
+            self._session.flush()
 
         return job
 
@@ -263,6 +288,7 @@ class IngestionJobRepository:
 
     def mark_succeeded(self, job: IngestionJob) -> IngestionJob:
         job.status = IngestionJobStatus.SUCCEEDED
+        job.stage = IngestionStage.SUCCEEDED
         job.error_message = None
         job.completed_at = datetime.now(UTC)
 
@@ -285,6 +311,7 @@ class IngestionJobRepository:
             raise ValueError("Failed ingestion jobs require an error message.")
 
         job.status = IngestionJobStatus.FAILED
+        job.stage = IngestionStage.FAILED
         job.error_message = normalized_error
         job.completed_at = datetime.now(UTC)
 
