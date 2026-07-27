@@ -40,6 +40,7 @@ class PromptBuilder:
         self,
         question: str,
         results: Sequence[RetrievalResult],
+        history: Sequence[tuple[str, str]] = (),
     ) -> str:
         normalized_question = question.strip()
 
@@ -47,9 +48,13 @@ class PromptBuilder:
             raise ValueError("question must not be empty")
 
         context = self._build_context(results)
+        conversation = self._build_history(history)
 
         return (
             f"{self._system_instruction}\n\n"
+            "CONVERSATION HISTORY\n"
+            "====================\n"
+            f"{conversation}\n\n"
             "CONTEXT\n"
             "=======\n"
             f"{context}\n\n"
@@ -64,6 +69,52 @@ class PromptBuilder:
             "- Cite supporting filenames inline, such as [fusion.txt].\n"
             "- Do not repeat the full context.\n"
             "- Do not include a separate source-filenames section.\n\n"
+            "ANSWER\n"
+            "======\n"
+        )
+
+    @staticmethod
+    def _build_history(
+        history: Sequence[tuple[str, str]],
+    ) -> str:
+        if not history:
+            return "[No prior conversation.]"
+
+        lines: list[str] = []
+        for role, content in history:
+            normalized_role = role.strip().lower()
+            normalized_content = content.strip()
+            if normalized_role not in {"user", "assistant"} or not normalized_content:
+                continue
+            label = "User" if normalized_role == "user" else "Assistant"
+            lines.append(f"{label}: {normalized_content}")
+
+        return "\n".join(lines) or "[No prior conversation.]"
+
+    def build_general(
+        self,
+        question: str,
+        history: Sequence[tuple[str, str]] = (),
+    ) -> str:
+        normalized_question = question.strip()
+        if not normalized_question:
+            raise ValueError("question must not be empty")
+
+        return (
+            "You are Homelab AI, a helpful local assistant. "
+            "Answer using your general model knowledge and clearly acknowledge "
+            "uncertainty when appropriate. Do not invent document citations. "
+            "Answer the current question directly. Use prior conversation only "
+            "when it materially helps answer the current question. Do not critique, "
+            "correct, or revisit an earlier answer unless the user explicitly asks "
+            "you to do so. Treat user-provided and document-grounded details in the "
+            "conversation as context, including hypothetical or fictional details.\n\n"
+            "CONVERSATION HISTORY\n"
+            "====================\n"
+            f"{self._build_history(history)}\n\n"
+            "QUESTION\n"
+            "========\n"
+            f"{normalized_question}\n\n"
             "ANSWER\n"
             "======\n"
         )

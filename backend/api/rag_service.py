@@ -86,6 +86,7 @@ class RAGSource:
 class RAGAnswer:
     answer: str
     sources: list[RAGSource]
+    answer_mode: str = "documents"
 
 
 @dataclass(frozen=True)
@@ -286,6 +287,9 @@ class HomelabRAGService:
         self,
         question: str,
         top_k: int | None = None,
+        history: list[tuple[str, str]] | None = None,
+        *,
+        hybrid: bool = False,
     ) -> RAGAnswer:
         normalized_question = question.strip()
 
@@ -310,12 +314,42 @@ class HomelabRAGService:
 
         result = pipeline.ask(
             normalized_question,
+            history=self._bounded_history(history or []),
+            hybrid=hybrid,
+            minimum_relevance_score=self._settings.hybrid_relevance_threshold,
         )
 
         return RAGAnswer(
             answer=result.answer,
             sources=[self._normalize_source(source) for source in result.sources],
+            answer_mode=result.answer_mode,
         )
+
+    def _bounded_history(
+        self,
+        history: list[tuple[str, str]],
+    ) -> list[tuple[str, str]]:
+        message_limit = self._settings.conversation_memory_messages
+        character_limit = self._settings.conversation_memory_chars
+        if message_limit == 0 or character_limit == 0:
+            return []
+
+        selected: list[tuple[str, str]] = []
+        used_chars = 0
+        for role, content in reversed(history[-message_limit:]):
+            normalized_content = content.strip()
+            if not normalized_content:
+                continue
+            remaining = character_limit - used_chars
+            if remaining <= 0:
+                break
+            if len(normalized_content) > remaining:
+                normalized_content = normalized_content[-remaining:]
+            selected.append((role, normalized_content))
+            used_chars += len(normalized_content)
+
+        selected.reverse()
+        return selected
 
     def evaluate(
         self,

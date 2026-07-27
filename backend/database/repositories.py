@@ -5,12 +5,15 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.database.models import (
+    Conversation,
+    ConversationMessage,
     Document,
     DocumentStatus,
     IngestionJob,
     IngestionJobStatus,
     IngestionOperation,
     IngestionStage,
+    MessageRole,
 )
 
 
@@ -322,3 +325,127 @@ class IngestionJobRepository:
     def delete(self, job: IngestionJob) -> None:
         self._session.delete(job)
         self._session.flush()
+
+
+class ConversationRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def create(
+        self,
+        *,
+        title: str = "New conversation",
+        owner_key: str = "local",
+    ) -> Conversation:
+        normalized_title = title.strip()
+        normalized_owner = owner_key.strip()
+        if not normalized_title:
+            raise ValueError("Conversation title cannot be empty.")
+        if not normalized_owner:
+            raise ValueError("Conversation owner cannot be empty.")
+
+        conversation = Conversation(
+            title=normalized_title,
+            owner_key=normalized_owner,
+        )
+        self._session.add(conversation)
+        self._session.flush()
+        return conversation
+
+    def get(
+        self,
+        conversation_id: UUID,
+        *,
+        owner_key: str = "local",
+    ) -> Conversation | None:
+        statement = select(Conversation).where(
+            Conversation.id == conversation_id,
+            Conversation.owner_key == owner_key,
+        )
+        return self._session.scalar(statement)
+
+    def list_all(
+        self,
+        *,
+        owner_key: str = "local",
+        offset: int = 0,
+        limit: int = 100,
+    ) -> list[Conversation]:
+        _validate_pagination(offset, limit)
+        statement = (
+            select(Conversation)
+            .where(Conversation.owner_key == owner_key)
+            .order_by(Conversation.updated_at.desc(), Conversation.id)
+            .offset(offset)
+            .limit(limit)
+        )
+        return list(self._session.scalars(statement))
+
+    def rename(
+        self,
+        conversation: Conversation,
+        title: str,
+    ) -> Conversation:
+        normalized_title = title.strip()
+        if not normalized_title:
+            raise ValueError("Conversation title cannot be empty.")
+        conversation.title = normalized_title
+        conversation.updated_at = datetime.now(UTC)
+        self._session.flush()
+        return conversation
+
+    def delete(self, conversation: Conversation) -> None:
+        self._session.delete(conversation)
+        self._session.flush()
+
+
+class ConversationMessageRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def create(
+        self,
+        *,
+        conversation: Conversation,
+        role: MessageRole,
+        content: str,
+        sources: list[dict[str, object]] | None = None,
+        answer_mode: str = "documents",
+    ) -> ConversationMessage:
+        normalized_content = content.strip()
+        if not normalized_content:
+            raise ValueError("Conversation message cannot be empty.")
+        if role is MessageRole.USER and sources:
+            raise ValueError("User messages cannot contain answer sources.")
+        normalized_answer_mode = answer_mode.strip().lower()
+        if normalized_answer_mode not in {"documents", "general"}:
+            raise ValueError("Answer mode must be 'documents' or 'general'.")
+
+        message = ConversationMessage(
+            conversation_id=conversation.id,
+            role=role,
+            content=normalized_content,
+            sources=sources or [],
+            answer_mode=normalized_answer_mode,
+            created_at=datetime.now(UTC),
+        )
+        conversation.updated_at = datetime.now(UTC)
+        self._session.add(message)
+        self._session.flush()
+        return message
+
+    def list_for_conversation(
+        self,
+        conversation_id: UUID,
+        *,
+        limit: int = 200,
+    ) -> list[ConversationMessage]:
+        if limit < 1 or limit > 1000:
+            raise ValueError("Message limit must be between 1 and 1000.")
+        statement = (
+            select(ConversationMessage)
+            .where(ConversationMessage.conversation_id == conversation_id)
+            .order_by(ConversationMessage.created_at, ConversationMessage.id)
+            .limit(limit)
+        )
+        return list(self._session.scalars(statement))

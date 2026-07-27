@@ -16,7 +16,7 @@ Designed around clean architecture, dependency injection, strict typing, and com
 
 **Latest Milestone**
 
-- End-to-End Local RAG Backend Complete
+- Durable document ingestion and persistent conversation memory
 
 **Progress**
 
@@ -26,7 +26,7 @@ Designed around clean architecture, dependency injection, strict typing, and com
 
 **Next Milestone**
 
-- Streamlit GUI
+- Streaming chat responses
 
 ---
 
@@ -47,9 +47,10 @@ Designed around clean architecture, dependency injection, strict typing, and com
 | RAG Pipeline | ✅ |
 | Indexing Service | ✅ |
 | End-to-end CLI Demo | ✅ |
-| Streamlit GUI | 🚧 |
-| FastAPI API | 🚧 |
-| Conversation Memory | 🚧 |
+| Streamlit GUI | ✅ |
+| FastAPI API | ✅ |
+| Conversation Memory | ✅ |
+| Hybrid document/general inference | ✅ |
 | Docker Support | 🚧 |
 
 ---
@@ -241,7 +242,7 @@ uv run python -m mypy backend
 - Ruff formatting
 - Ruff linting
 - Strict mypy type checking
-- 109 automated tests
+- 250 automated tests (249 passed, 1 skipped)
 - Integration testing
 - Dependency Injection
 - Protocol-based interfaces
@@ -265,17 +266,17 @@ uv run python -m mypy backend
 
 ## Version 1.1
 
-- Streamlit GUI
-- FastAPI REST API
-- Persistent Vector Database
-- PDF Support
-- Markdown Support
+- ✅ Streamlit GUI
+- ✅ FastAPI REST API
+- ✅ Persistent Vector Database
+- ✅ PDF Support
+- ✅ Markdown Support
 
 ---
 
 ## Version 1.2
 
-- Conversation Memory
+- ✅ Conversation Memory
 - Streaming Responses
 - Docker Deployment
 - Benchmark Suite

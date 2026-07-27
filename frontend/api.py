@@ -113,6 +113,26 @@ class Document:
 
 
 @dataclass(frozen=True)
+class ConversationMessage:
+    id: str
+    role: str
+    content: str
+    answer_mode: str
+    sources: list[Source]
+    created_at: str
+
+
+@dataclass(frozen=True)
+class Conversation:
+    id: str
+    title: str
+    message_count: int
+    messages: list[ConversationMessage]
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
 class EvaluationMetrics:
     question_count: int
     hit_at_1: float
@@ -251,6 +271,133 @@ class HomelabAPIClient:
                 )
             ),
             sources=sources,
+        )
+
+    def create_conversation(
+        self,
+        title: str = "New conversation",
+    ) -> Conversation:
+        response = self._request(
+            method="POST",
+            path="/conversations",
+            json={"title": title},
+        )
+        return self._parse_conversation(response)
+
+    def list_conversations(self) -> list[Conversation]:
+        payload = self._request_json_value(
+            method="GET",
+            path="/conversations",
+        )
+        if not isinstance(payload, list):
+            raise HomelabAPIError(
+                "The backend returned an unexpected conversation list.",
+            )
+        return [self._parse_conversation(item) for item in payload if isinstance(item, dict)]
+
+    def get_conversation(
+        self,
+        conversation_id: str,
+    ) -> Conversation:
+        response = self._request(
+            method="GET",
+            path=f"/conversations/{conversation_id}",
+        )
+        return self._parse_conversation(response)
+
+    def rename_conversation(
+        self,
+        conversation_id: str,
+        title: str,
+    ) -> Conversation:
+        response = self._request(
+            method="PATCH",
+            path=f"/conversations/{conversation_id}",
+            json={"title": title},
+        )
+        return self._parse_conversation(response)
+
+    def delete_conversation(
+        self,
+        conversation_id: str,
+    ) -> None:
+        self._request_json_value(
+            method="DELETE",
+            path=f"/conversations/{conversation_id}",
+            allow_empty=True,
+        )
+
+    def send_conversation_message(
+        self,
+        conversation_id: str,
+        content: str,
+        top_k: int,
+    ) -> Conversation:
+        response = self._request(
+            method="POST",
+            path=f"/conversations/{conversation_id}/messages",
+            json={
+                "content": content,
+                "top_k": top_k,
+            },
+        )
+        raw_conversation = response.get("conversation")
+        if not isinstance(raw_conversation, dict):
+            raise HomelabAPIError(
+                "The backend returned an invalid conversation response.",
+            )
+        return self._parse_conversation(raw_conversation)
+
+    @classmethod
+    def _parse_conversation(
+        cls,
+        payload: dict[str, Any],
+    ) -> Conversation:
+        raw_messages = payload.get("messages", [])
+        messages = (
+            [
+                cls._parse_conversation_message(item)
+                for item in raw_messages
+                if isinstance(item, dict)
+            ]
+            if isinstance(raw_messages, list)
+            else []
+        )
+        return Conversation(
+            id=str(payload.get("id", "")),
+            title=str(payload.get("title", "New conversation")),
+            message_count=int(payload.get("message_count", len(messages))),
+            messages=messages,
+            created_at=str(payload.get("created_at", "")),
+            updated_at=str(payload.get("updated_at", "")),
+        )
+
+    @staticmethod
+    def _parse_conversation_message(
+        payload: dict[str, Any],
+    ) -> ConversationMessage:
+        raw_sources = payload.get("sources", [])
+        sources = (
+            [
+                Source(
+                    text=str(source.get("text", "")),
+                    score=float(source.get("score", 0.0)),
+                    document=str(source.get("document", "unknown")),
+                    chunk_id=str(source.get("chunk_id", "")),
+                )
+                for source in raw_sources
+                if isinstance(source, dict)
+            ]
+            if isinstance(raw_sources, list)
+            else []
+        )
+        return ConversationMessage(
+            id=str(payload.get("id", "")),
+            role=str(payload.get("role", "assistant")),
+            content=str(payload.get("content", "")),
+            answer_mode=str(payload.get("answer_mode", "documents")),
+            sources=sources,
+            created_at=str(payload.get("created_at", "")),
         )
 
     def upload_document(
@@ -603,6 +750,25 @@ class HomelabAPIClient:
         ]
         | None = None,
     ) -> dict[str, Any]:
+        payload = self._request_json_value(
+            method=method,
+            path=path,
+            json=json,
+            files=files,
+        )
+        if not isinstance(payload, dict):
+            raise HomelabAPIError("The backend returned an unexpected response format.")
+        return payload
+
+    def _request_json_value(
+        self,
+        method: str,
+        path: str,
+        json: dict[str, Any] | None = None,
+        files: dict[str, tuple[str, bytes, str]] | None = None,
+        *,
+        allow_empty: bool = False,
+    ) -> Any:
         url = f"{self.base_url}{path}"
 
         try:
@@ -635,15 +801,15 @@ class HomelabAPIClient:
         except httpx.HTTPError as exc:
             raise HomelabAPIError(f"An HTTP error occurred: {exc}") from exc
 
+        if allow_empty and not response.content:
+            return None
+
         try:
             payload = response.json()
         except ValueError as exc:
             raise HomelabAPIError(
                 "The backend returned a response that was not valid JSON."
             ) from exc
-
-        if not isinstance(payload, dict):
-            raise HomelabAPIError("The backend returned an unexpected response format.")
 
         return payload
 
