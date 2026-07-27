@@ -1,4 +1,6 @@
+import json
 import os
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
 
@@ -347,6 +349,51 @@ class HomelabAPIClient:
                 "The backend returned an invalid conversation response.",
             )
         return self._parse_conversation(raw_conversation)
+
+    def stream_conversation_message(
+        self,
+        conversation_id: str,
+        content: str,
+        top_k: int,
+    ) -> Iterator[dict[str, Any]]:
+        url = f"{self.base_url}/conversations/{conversation_id}/messages/stream"
+        try:
+            with httpx.Client(timeout=self.timeout) as client:
+                with client.stream(
+                    "POST",
+                    url,
+                    json={"content": content, "top_k": top_k},
+                ) as response:
+                    response.raise_for_status()
+                    for line in response.iter_lines():
+                        if not line.strip():
+                            continue
+                        try:
+                            payload = json.loads(line)
+                        except ValueError as exc:
+                            raise HomelabAPIError(
+                                "The backend returned an invalid streaming event."
+                            ) from exc
+                        if not isinstance(payload, dict):
+                            raise HomelabAPIError(
+                                "The backend returned an unexpected streaming event."
+                            )
+                        if payload.get("type") == "error":
+                            raise HomelabAPIError(str(payload.get("detail", "Streaming failed.")))
+                        yield payload
+        except httpx.ConnectError as exc:
+            raise HomelabAPIError(
+                f"Could not connect to the Homelab AI backend at {self.base_url}."
+            ) from exc
+        except httpx.TimeoutException as exc:
+            raise HomelabAPIError("The streaming request timed out.") from exc
+        except httpx.HTTPStatusError as exc:
+            detail = self._extract_error_detail(exc.response)
+            raise HomelabAPIError(
+                f"Backend request failed with status {exc.response.status_code}: {detail}"
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise HomelabAPIError(f"An HTTP error occurred: {exc}") from exc
 
     @classmethod
     def _parse_conversation(

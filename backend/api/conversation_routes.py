@@ -1,9 +1,12 @@
+import json
 import logging
+from collections.abc import Iterator
 from time import perf_counter
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from backend.api.dependencies import get_rag_service
@@ -271,4 +274,116 @@ def add_conversation_message(
             source_count=len(result.sources),
             elapsed_ms=round(elapsed_ms, 2),
         ),
+    )
+
+
+@router.post(
+    "/{conversation_id}/messages/stream",
+    response_class=StreamingResponse,
+)
+def stream_conversation_message(
+    conversation_id: UUID,
+    request: ConversationMessageRequest,
+    session: Annotated[Session, Depends(get_database_session)],
+    rag_service: Annotated[HomelabRAGService, Depends(get_rag_service)],
+) -> StreamingResponse:
+    normalized_content = request.content.strip()
+    if not normalized_content:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Message cannot be empty.",
+        )
+
+    conversations = ConversationRepository(session)
+    messages = ConversationMessageRepository(session)
+    conversation = _get_conversation_or_404(conversations, conversation_id)
+    prior_messages = messages.list_for_conversation(conversation.id)
+    history = [(message.role.value, message.content) for message in prior_messages]
+
+    with session.begin_nested():
+        messages.create(
+            conversation=conversation,
+            role=MessageRole.USER,
+            content=normalized_content,
+        )
+        if conversation.title == "New conversation":
+            conversations.rename(conversation, normalized_content[:80])
+    session.commit()
+
+    def encode_event(event: dict[str, object]) -> str:
+        return json.dumps(event, separators=(",", ":"), default=str) + "\n"
+
+    def generate_events() -> Iterator[str]:
+        started_at = perf_counter()
+        try:
+            result = rag_service.stream_answer(
+                question=normalized_content,
+                top_k=request.top_k,
+                history=history,
+                hybrid=True,
+            )
+            source_payloads: list[dict[str, object]] = [
+                {
+                    "text": source.text,
+                    "score": source.score,
+                    "document": source.document,
+                    "chunk_id": source.chunk_id,
+                }
+                for source in result.sources
+            ]
+            yield encode_event(
+                {
+                    "type": "start",
+                    "answer_mode": result.answer_mode,
+                    "sources": source_payloads,
+                }
+            )
+
+            chunks: list[str] = []
+            for chunk in result.chunks:
+                chunks.append(chunk)
+                yield encode_event({"type": "token", "content": chunk})
+
+            answer = "".join(chunks).strip()
+            if not answer:
+                raise RuntimeError("The model returned an empty response.")
+
+            with session.begin():
+                current_conversation = _get_conversation_or_404(
+                    conversations,
+                    conversation_id,
+                )
+                assistant = messages.create(
+                    conversation=current_conversation,
+                    role=MessageRole.ASSISTANT,
+                    content=answer,
+                    sources=source_payloads,
+                    answer_mode=result.answer_mode,
+                )
+
+            yield encode_event(
+                {
+                    "type": "complete",
+                    "assistant_message": _message_response(assistant).model_dump(
+                        mode="json"
+                    ),
+                    "elapsed_ms": round((perf_counter() - started_at) * 1_000, 2),
+                }
+            )
+        except GeneratorExit:
+            raise
+        except Exception as exc:
+            session.rollback()
+            logger.exception("Streaming conversation generation failed")
+            yield encode_event(
+                {
+                    "type": "error",
+                    "detail": str(exc) or "The message could not be processed.",
+                }
+            )
+
+    return StreamingResponse(
+        generate_events(),
+        media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

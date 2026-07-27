@@ -1,3 +1,4 @@
+import json
 from collections.abc import Iterator
 
 from fastapi.testclient import TestClient
@@ -7,7 +8,7 @@ from sqlalchemy.pool import StaticPool
 
 from backend.api.app import app
 from backend.api.dependencies import get_rag_service
-from backend.api.rag_service import RAGAnswer, RAGSource
+from backend.api.rag_service import RAGAnswer, RAGSource, RAGStream
 from backend.database import Base, get_database_session
 
 
@@ -15,6 +16,7 @@ class ConversationRAGService:
     def __init__(self) -> None:
         self.histories: list[list[tuple[str, str]]] = []
         self.should_fail = False
+        self.stream_should_fail = False
 
     def ask(
         self,
@@ -29,6 +31,36 @@ class ConversationRAGService:
             raise RuntimeError("Generator unavailable.")
         return RAGAnswer(
             answer=f"Grounded answer: {question}",
+            sources=[
+                RAGSource(
+                    text="Persistent source",
+                    score=0.9,
+                    document="memory.txt",
+                    chunk_id="chunk-1",
+                ),
+            ][:top_k],
+            answer_mode="documents",
+        )
+
+    def stream_answer(
+        self,
+        question: str,
+        top_k: int = 5,
+        history: list[tuple[str, str]] | None = None,
+        *,
+        hybrid: bool = False,
+    ) -> RAGStream:
+        del hybrid
+        self.histories.append(history or [])
+
+        def chunks() -> Iterator[str]:
+            yield "Streamed "
+            if self.stream_should_fail:
+                raise RuntimeError("Stream interrupted.")
+            yield f"answer: {question}"
+
+        return RAGStream(
+            chunks=chunks(),
             sources=[
                 RAGSource(
                     text="Persistent source",
@@ -147,5 +179,66 @@ def test_failed_generation_keeps_only_user_message() -> None:
         assert [(message["role"], message["content"]) for message in messages] == [
             ("user", "This generation will fail."),
         ]
+    finally:
+        generator.close()
+
+
+def test_streamed_generation_persists_only_completed_answer() -> None:
+    generator = _client()
+    client, _ = next(generator)
+    try:
+        created = client.post("/conversations", json={})
+        conversation_id = created.json()["id"]
+
+        with client.stream(
+            "POST",
+            f"/conversations/{conversation_id}/messages/stream",
+            json={"content": "Stream this answer."},
+        ) as response:
+            events = [json.loads(line) for line in response.iter_lines()]
+
+        assert response.status_code == 200
+        assert [event["type"] for event in events] == [
+            "start",
+            "token",
+            "token",
+            "complete",
+        ]
+        conversation = client.get(f"/conversations/{conversation_id}").json()
+        assert [
+            (message["role"], message["content"])
+            for message in conversation["messages"]
+        ] == [
+            ("user", "Stream this answer."),
+            ("assistant", "Streamed answer: Stream this answer."),
+        ]
+    finally:
+        generator.close()
+
+
+def test_interrupted_stream_keeps_user_without_partial_assistant() -> None:
+    generator = _client()
+    client, rag_service = next(generator)
+    try:
+        created = client.post("/conversations", json={})
+        conversation_id = created.json()["id"]
+        rag_service.stream_should_fail = True
+
+        with client.stream(
+            "POST",
+            f"/conversations/{conversation_id}/messages/stream",
+            json={"content": "Interrupt this answer."},
+        ) as response:
+            events = [json.loads(line) for line in response.iter_lines()]
+
+        assert events[-1] == {
+            "type": "error",
+            "detail": "Stream interrupted.",
+        }
+        conversation = client.get(f"/conversations/{conversation_id}").json()
+        assert [
+            (message["role"], message["content"])
+            for message in conversation["messages"]
+        ] == [("user", "Interrupt this answer.")]
     finally:
         generator.close()

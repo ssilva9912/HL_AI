@@ -364,36 +364,42 @@ def render_chat_tab(
         st.markdown(cleaned_question)
 
     with st.chat_message("assistant"):
-        with st.spinner("Searching documents and generating an answer..."):
+        answer_placeholder = st.empty()
+        answer = ""
+        stream_completed = False
+        try:
+            for event in client.stream_conversation_message(
+                conversation_id=conversation_id,
+                content=cleaned_question,
+                top_k=top_k,
+            ):
+                event_type = str(event.get("type", ""))
+                if event_type == "token":
+                    answer += str(event.get("content", ""))
+                    answer_placeholder.markdown(f"{answer} _")
+                elif event_type == "complete":
+                    stream_completed = True
+        except (ValueError, HomelabAPIError) as exc:
+            answer_placeholder.empty()
+            st.error(f"Streaming failed: {exc}")
+            st.session_state.backend_status = None
             try:
-                conversation = client.send_conversation_message(
-                    conversation_id=conversation_id,
-                    content=cleaned_question,
-                    top_k=top_k,
-                )
-            except ValueError as exc:
-                error_message = str(exc)
-                st.warning(error_message)
+                load_conversation(client.get_conversation(conversation_id))
+            except HomelabAPIError:
+                pass
+            return
 
-                add_message(
-                    role="assistant",
-                    content=error_message,
-                )
-                return
+        if not stream_completed:
+            answer_placeholder.empty()
+            st.error("The response stream ended before completion. You can retry.")
+            return
 
-            except HomelabAPIError as exc:
-                error_message = f"Request failed: {exc}"
-                st.error(error_message)
-
-                st.session_state.backend_status = None
-
-                try:
-                    load_conversation(
-                        client.get_conversation(conversation_id),
-                    )
-                except HomelabAPIError:
-                    pass
-                return
+        answer_placeholder.markdown(answer)
+        try:
+            conversation = client.get_conversation(conversation_id)
+        except HomelabAPIError as exc:
+            st.error(f"The answer completed but could not be reloaded: {exc}")
+            return
 
         load_conversation(conversation)
         assistant_messages = [
@@ -401,7 +407,6 @@ def render_chat_tab(
         ]
         if assistant_messages:
             assistant = assistant_messages[-1]
-            st.markdown(assistant.content)
             display_answer_mode(assistant.answer_mode)
             serialized_sources = [
                 {
