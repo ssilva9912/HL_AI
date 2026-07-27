@@ -5,6 +5,7 @@ from enum import StrEnum
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     CheckConstraint,
     DateTime,
@@ -52,6 +53,11 @@ class IngestionStage(StrEnum):
     FAILED = "failed"
 
 
+class MessageRole(StrEnum):
+    USER = "user"
+    ASSISTANT = "assistant"
+
+
 document_status_type = SqlEnum(
     DocumentStatus,
     name="document_status",
@@ -82,6 +88,15 @@ ingestion_job_status_type = SqlEnum(
 ingestion_stage_type = SqlEnum(
     IngestionStage,
     name="ingestion_stage",
+    native_enum=False,
+    create_constraint=True,
+    validate_strings=True,
+    values_callable=lambda enum_type: [member.value for member in enum_type],
+)
+
+message_role_type = SqlEnum(
+    MessageRole,
+    name="message_role",
     native_enum=False,
     create_constraint=True,
     validate_strings=True,
@@ -338,4 +353,103 @@ class IngestionPayload(Base):
 
     job: Mapped[IngestionJob] = relationship(
         back_populates="payload",
+    )
+
+
+class Conversation(Base):
+    __tablename__ = "conversations"
+
+    id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+
+    title: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        default="New conversation",
+        server_default="New conversation",
+    )
+
+    owner_key: Mapped[str] = mapped_column(
+        String(128),
+        nullable=False,
+        default="local",
+        server_default="local",
+        index=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+        index=True,
+    )
+
+    messages: Mapped[list[ConversationMessage]] = relationship(
+        back_populates="conversation",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="ConversationMessage.created_at, ConversationMessage.id",
+    )
+
+
+class ConversationMessage(Base):
+    __tablename__ = "conversation_messages"
+
+    id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+
+    conversation_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            "conversations.id",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+        index=True,
+    )
+
+    role: Mapped[MessageRole] = mapped_column(
+        message_role_type,
+        nullable=False,
+    )
+
+    content: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )
+
+    answer_mode: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="documents",
+        server_default="documents",
+    )
+
+    sources: Mapped[list[dict[str, object]]] = mapped_column(
+        JSON,
+        nullable=False,
+        default=list,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        index=True,
+    )
+
+    conversation: Mapped[Conversation] = relationship(
+        back_populates="messages",
     )

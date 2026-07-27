@@ -15,6 +15,8 @@ from backend.database.ingestion_queue import (
     QueuedIngestion,
 )
 from backend.database.models import (
+    Conversation,
+    ConversationMessage,
     Document,
     DocumentStatus,
     IngestionJob,
@@ -22,6 +24,7 @@ from backend.database.models import (
     IngestionOperation,
     IngestionPayload,
     IngestionStage,
+    MessageRole,
 )
 from backend.database.payload_repository import (
     IngestionPayloadRepository,
@@ -31,6 +34,8 @@ from backend.database.queued_worker import (
     QueuedIngestionWorker,
 )
 from backend.database.repositories import (
+    ConversationMessageRepository,
+    ConversationRepository,
     DocumentRepository,
     IngestionJobRepository,
 )
@@ -45,6 +50,10 @@ from backend.database.session import (
 __all__ = [
     "Base",
     "ClaimedIngestion",
+    "Conversation",
+    "ConversationMessage",
+    "ConversationMessageRepository",
+    "ConversationRepository",
     "DatabaseNotConfiguredError",
     "Document",
     "DocumentRepository",
@@ -61,6 +70,7 @@ __all__ = [
     "IngestionPayload",
     "IngestionPayloadRepository",
     "IngestionQueue",
+    "MessageRole",
     "QueuedIngestion",
     "QueuedIngestionWorker",
     "active_ingestion_job_index",

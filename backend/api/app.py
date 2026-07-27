@@ -5,6 +5,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from backend.api.conversation_routes import (
+    router as conversation_router,
+)
 from backend.api.dependencies import (
     get_queued_ingestion_service,
 )
@@ -64,6 +67,7 @@ def create_app() -> FastAPI:
 
     application.include_router(api_router)
     application.include_router(ingestion_router)
+    application.include_router(conversation_router)
 
     return application
 

@@ -20,6 +20,17 @@
 - Add source paths
 - Force answers to cite local files
 - Add "I don't know" behavior when context is missing
+- Persist conversations and cited answers
+
+## Current Delivery Status
+- Streamlit document chat complete
+- FastAPI REST API complete
+- PostgreSQL document and ingestion persistence complete
+- Qdrant vector persistence complete
+- Durable background ingestion complete
+- Persistent conversation memory complete
+- Hybrid document/general inference complete
+- Next: streaming chat responses
 
 ## Phase 4: Homelab Integration
 - Move services to Docker

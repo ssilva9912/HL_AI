@@ -75,6 +75,29 @@ class Settings(BaseSettings):
         le=20,
     )
 
+    conversation_memory_messages: int = Field(
+        default=12,
+        ge=0,
+        le=50,
+        description=("Maximum number of recent messages included in a chat prompt."),
+    )
+
+    conversation_memory_chars: int = Field(
+        default=4_000,
+        ge=0,
+        le=20_000,
+        description=("Maximum character budget for conversation history in a prompt."),
+    )
+
+    hybrid_relevance_threshold: float = Field(
+        default=0.0,
+        ge=-20.0,
+        le=20.0,
+        description=(
+            "Minimum cross-encoder score required to ground a hybrid answer in retrieved documents."
+        ),
+    )
+
     max_upload_bytes: int = Field(
         default=10 * 1024 * 1024,
         gt=0,

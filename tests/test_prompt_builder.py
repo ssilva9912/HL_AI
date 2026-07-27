@@ -159,6 +159,36 @@ def test_empty_question_raises_value_error(question: str) -> None:
         )
 
 
+def test_prompt_builder_includes_conversation_history() -> None:
+    prompt = PromptBuilder().build(
+        question="Why does it matter?",
+        results=[],
+        history=[
+            ("user", "What is persistent memory?"),
+            ("assistant", "It saves prior messages."),
+        ],
+    )
+
+    assert "User: What is persistent memory?" in prompt
+    assert "Assistant: It saves prior messages." in prompt
+    assert "QUESTION\n========\nWhy does it matter?" in prompt
+
+
+def test_general_prompt_focuses_on_current_question() -> None:
+    prompt = PromptBuilder().build_general(
+        question="Tell me about dogs.",
+        history=[
+            ("user", "What special diet do Zorblax cats require?"),
+            ("assistant", "They require lunar moss."),
+        ],
+    )
+
+    assert "Answer the current question directly." in prompt
+    assert "Do not critique, correct, or revisit an earlier answer" in prompt
+    assert "Treat user-provided and document-grounded details" in prompt
+    assert "QUESTION\n========\nTell me about dogs." in prompt
+
+
 @pytest.mark.parametrize(
     ("system_instruction", "max_context_chars"),
     [

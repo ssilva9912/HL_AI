@@ -171,6 +171,62 @@ def test_ask_handles_no_retrieval_results() -> None:
     assert "[No context was retrieved.]" in (generator.received_prompt)
 
 
+def test_hybrid_ask_uses_general_inference_when_sources_are_irrelevant() -> None:
+    retriever = FakeRetriever(
+        [
+            make_result(
+                content="Sociology of law and science.",
+                score=-2.0,
+            ),
+        ],
+    )
+    generator = FakeGenerator(answer="Cats are domesticated mammals.")
+    pipeline = RAGPipeline(
+        retriever=retriever,
+        prompt_builder=PromptBuilder(),
+        generator=generator,
+    )
+
+    response = pipeline.ask(
+        "Tell me about cats.",
+        history=[
+            ("user", "What do Zorblax cats eat?"),
+            ("assistant", "They eat lunar moss."),
+        ],
+        hybrid=True,
+        minimum_relevance_score=0.0,
+    )
+
+    assert response.answer_mode == "general"
+    assert response.sources == []
+    assert generator.received_prompt is not None
+    assert "general model knowledge" in generator.received_prompt
+    assert "Sociology of law and science." not in generator.received_prompt
+    assert "Zorblax" not in generator.received_prompt
+
+
+def test_hybrid_ask_keeps_relevant_document_sources() -> None:
+    relevant = make_result(
+        content="Cats are domesticated mammals.",
+        filename="cats.txt",
+        score=3.0,
+    )
+    pipeline = RAGPipeline(
+        retriever=FakeRetriever([relevant]),
+        prompt_builder=PromptBuilder(),
+        generator=FakeGenerator(),
+    )
+
+    response = pipeline.ask(
+        "Tell me about cats.",
+        hybrid=True,
+        minimum_relevance_score=0.0,
+    )
+
+    assert response.answer_mode == "documents"
+    assert response.sources == [relevant]
+
+
 def test_question_is_stripped_before_processing() -> None:
     retriever = FakeRetriever([])
     generator = FakeGenerator()

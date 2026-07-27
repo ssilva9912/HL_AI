@@ -113,3 +113,57 @@ class IngestionJobResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     service: str
+
+
+class ConversationCreateRequest(BaseModel):
+    title: str = Field(
+        default="New conversation",
+        min_length=1,
+        max_length=255,
+    )
+
+
+class ConversationUpdateRequest(BaseModel):
+    title: str = Field(
+        min_length=1,
+        max_length=255,
+    )
+
+
+class ConversationMessageRequest(BaseModel):
+    content: str = Field(
+        min_length=1,
+        max_length=2_000,
+    )
+    top_k: int = Field(
+        default=5,
+        ge=1,
+        le=20,
+    )
+
+
+class ConversationMessageResponse(BaseModel):
+    id: UUID
+    conversation_id: UUID
+    role: str
+    content: str
+    answer_mode: str
+    sources: list[SourceResponse]
+    created_at: datetime
+
+
+class ConversationResponse(BaseModel):
+    id: UUID
+    title: str
+    owner_key: str
+    created_at: datetime
+    updated_at: datetime
+    message_count: int
+    messages: list[ConversationMessageResponse] = Field(default_factory=list)
+
+
+class ConversationAnswerResponse(BaseModel):
+    conversation: ConversationResponse
+    user_message: ConversationMessageResponse
+    assistant_message: ConversationMessageResponse
+    metadata: SearchMetadata

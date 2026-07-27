@@ -3,6 +3,7 @@ from typing import Any
 
 import streamlit as st
 from api import (
+    Conversation,
     EvaluationResult,
     HomelabAPIClient,
     HomelabAPIError,
@@ -29,6 +30,9 @@ def initialize_session_state() -> None:
 
     if "ingestion_results" not in st.session_state:
         st.session_state.ingestion_results = []
+
+    if "active_conversation_id" not in st.session_state:
+        st.session_state.active_conversation_id = None
 
 
 def get_api_client() -> HomelabAPIClient:
@@ -59,6 +63,33 @@ def add_message(
             "sources": sources or [],
         }
     )
+
+
+def load_conversation(
+    conversation: Conversation,
+) -> None:
+    st.session_state.active_conversation_id = conversation.id
+    st.session_state.messages = [
+        {
+            "role": message.role,
+            "content": message.content,
+            "answer_mode": getattr(
+                message,
+                "answer_mode",
+                "documents",
+            ),
+            "sources": [
+                {
+                    "text": source.text,
+                    "score": source.score,
+                    "document": source.document,
+                    "chunk_id": source.chunk_id,
+                }
+                for source in message.sources
+            ],
+        }
+        for message in conversation.messages
+    ]
 
 
 def serialize_sources(
@@ -122,6 +153,15 @@ def display_sources(
                 st.divider()
 
 
+def display_answer_mode(answer_mode: str) -> None:
+    if answer_mode == "general":
+        st.caption(
+            "General local-model answer · not grounded in uploaded documents",
+        )
+    else:
+        st.caption("Document-grounded answer")
+
+
 def display_chat_history() -> None:
     for message in st.session_state.messages:
         role = message.get(
@@ -136,11 +176,16 @@ def display_chat_history() -> None:
             "sources",
             [],
         )
+        answer_mode = message.get(
+            "answer_mode",
+            "documents",
+        )
 
         with st.chat_message(role):
             st.markdown(content)
 
             if role == "assistant":
+                display_answer_mode(answer_mode)
                 display_sources(sources)
 
 
@@ -150,6 +195,93 @@ def render_sidebar(
     with st.sidebar:
         st.header("Homelab AI")
         st.caption("Local retrieval-augmented generation")
+
+        st.divider()
+
+        st.subheader("Conversations")
+        if st.button(
+            "New conversation",
+            use_container_width=True,
+            type="primary",
+        ):
+            try:
+                conversation = client.create_conversation()
+            except HomelabAPIError as exc:
+                st.error(str(exc))
+            else:
+                load_conversation(conversation)
+                st.rerun()
+
+        try:
+            conversations = client.list_conversations()
+        except HomelabAPIError as exc:
+            conversations = []
+            st.warning(f"Could not load conversations: {exc}")
+
+        if conversations:
+            conversation_by_id = {conversation.id: conversation for conversation in conversations}
+            active_id = st.session_state.active_conversation_id
+            if active_id not in conversation_by_id:
+                active_id = conversations[0].id
+                load_conversation(
+                    client.get_conversation(active_id),
+                )
+
+            conversation_ids = list(conversation_by_id)
+            selected_id = st.selectbox(
+                "Saved conversations",
+                options=conversation_ids,
+                index=conversation_ids.index(active_id),
+                format_func=lambda conversation_id: conversation_by_id[conversation_id].title,
+                label_visibility="collapsed",
+            )
+            if selected_id != st.session_state.active_conversation_id:
+                try:
+                    load_conversation(
+                        client.get_conversation(selected_id),
+                    )
+                except HomelabAPIError as exc:
+                    st.error(str(exc))
+                else:
+                    st.rerun()
+
+            active = conversation_by_id[selected_id]
+            with st.expander("Conversation settings"):
+                title = st.text_input(
+                    "Title",
+                    value=active.title,
+                    key=f"title-{active.id}",
+                )
+                if st.button(
+                    "Rename",
+                    key=f"rename-{active.id}",
+                    use_container_width=True,
+                ):
+                    try:
+                        renamed = client.rename_conversation(
+                            active.id,
+                            title,
+                        )
+                    except (ValueError, HomelabAPIError) as exc:
+                        st.error(str(exc))
+                    else:
+                        load_conversation(renamed)
+                        st.rerun()
+                if st.button(
+                    "Delete conversation",
+                    key=f"delete-{active.id}",
+                    use_container_width=True,
+                ):
+                    try:
+                        client.delete_conversation(active.id)
+                    except HomelabAPIError as exc:
+                        st.error(str(exc))
+                    else:
+                        st.session_state.active_conversation_id = None
+                        st.session_state.messages = []
+                        st.rerun()
+        else:
+            st.caption("Create a conversation to begin chatting.")
 
         st.divider()
 
@@ -185,13 +317,6 @@ def render_sidebar(
             check_backend(client)
             st.rerun()
 
-        if st.button(
-            "Clear conversation",
-            use_container_width=True,
-        ):
-            st.session_state.messages = []
-            st.rerun()
-
         st.divider()
         st.caption(f"API: `{API_URL}`")
 
@@ -203,7 +328,9 @@ def render_chat_tab(
     top_k: int,
 ) -> None:
     st.subheader("Document chat")
-    st.caption("Ask questions about documents indexed by your local RAG system.")
+    st.caption(
+        "Ask questions about your documents. Conversations and citations are saved.",
+    )
 
     display_chat_history()
 
@@ -218,6 +345,16 @@ def render_chat_tab(
         st.warning("Enter a question before submitting.")
         return
 
+    conversation_id = st.session_state.active_conversation_id
+    if conversation_id is None:
+        try:
+            conversation = client.create_conversation()
+        except HomelabAPIError as exc:
+            st.error(f"Could not create a conversation: {exc}")
+            return
+        load_conversation(conversation)
+        conversation_id = conversation.id
+
     add_message(
         role="user",
         content=cleaned_question,
@@ -229,8 +366,9 @@ def render_chat_tab(
     with st.chat_message("assistant"):
         with st.spinner("Searching documents and generating an answer..."):
             try:
-                result = client.search(
-                    question=cleaned_question,
+                conversation = client.send_conversation_message(
+                    conversation_id=conversation_id,
+                    content=cleaned_question,
                     top_k=top_k,
                 )
             except ValueError as exc:
@@ -249,22 +387,32 @@ def render_chat_tab(
 
                 st.session_state.backend_status = None
 
-                add_message(
-                    role="assistant",
-                    content=error_message,
-                )
+                try:
+                    load_conversation(
+                        client.get_conversation(conversation_id),
+                    )
+                except HomelabAPIError:
+                    pass
                 return
 
-        st.markdown(result.answer)
-
-        serialized_sources = serialize_sources(result)
-        display_sources(serialized_sources)
-
-        add_message(
-            role="assistant",
-            content=result.answer,
-            sources=serialized_sources,
-        )
+        load_conversation(conversation)
+        assistant_messages = [
+            message for message in conversation.messages if message.role == "assistant"
+        ]
+        if assistant_messages:
+            assistant = assistant_messages[-1]
+            st.markdown(assistant.content)
+            display_answer_mode(assistant.answer_mode)
+            serialized_sources = [
+                {
+                    "text": source.text,
+                    "score": source.score,
+                    "document": source.document,
+                    "chunk_id": source.chunk_id,
+                }
+                for source in assistant.sources
+            ]
+            display_sources(serialized_sources)
 
 
 def render_documents_tab(
