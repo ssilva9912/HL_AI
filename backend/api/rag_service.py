@@ -1,6 +1,6 @@
 import logging
 import mimetypes
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
@@ -104,6 +104,13 @@ class DocumentDeletionResult:
     document_id: UUID
     document: str
     deleted_chunk_count: int
+
+
+@dataclass(frozen=True)
+class RAGStream:
+    chunks: Iterator[str]
+    sources: list[RAGSource]
+    answer_mode: str
 
 
 class HomelabRAGService:
@@ -323,6 +330,34 @@ class HomelabRAGService:
             answer=result.answer,
             sources=[self._normalize_source(source) for source in result.sources],
             answer_mode=result.answer_mode,
+        )
+
+    def stream_answer(
+        self,
+        question: str,
+        top_k: int | None = None,
+        history: list[tuple[str, str]] | None = None,
+        *,
+        hybrid: bool = False,
+    ) -> RAGStream:
+        normalized_question = question.strip()
+        if not normalized_question:
+            raise ValueError("question must not be empty")
+        resolved_top_k = top_k if top_k is not None else self._settings.default_top_k
+        if resolved_top_k <= 0:
+            raise ValueError("top_k must be positive")
+
+        pipeline = build_rag_pipeline(corpus=self._get_corpus(), top_k=resolved_top_k)
+        prepared = pipeline.prepare(
+            normalized_question,
+            history=self._bounded_history(history or []),
+            hybrid=hybrid,
+            minimum_relevance_score=self._settings.hybrid_relevance_threshold,
+        )
+        return RAGStream(
+            chunks=pipeline.stream(prepared),
+            sources=[self._normalize_source(source) for source in prepared.sources],
+            answer_mode=prepared.answer_mode,
         )
 
     def _bounded_history(

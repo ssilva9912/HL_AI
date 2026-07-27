@@ -16,17 +16,17 @@ Designed around clean architecture, dependency injection, strict typing, and com
 
 **Latest Milestone**
 
-- Durable document ingestion and persistent conversation memory
+- Durable document ingestion, persistent conversations, and streaming chat
 
 **Progress**
 
 ```
-████████████████████░ 96%
+████████████████████░ 98%
 ```
 
 **Next Milestone**
 
-- Streaming chat responses
+- Docker deployment
 
 ---
 
@@ -51,6 +51,7 @@ Designed around clean architecture, dependency injection, strict typing, and com
 | FastAPI API | ✅ |
 | Conversation Memory | ✅ |
 | Hybrid document/general inference | ✅ |
+| Streaming chat responses | ✅ |
 | Docker Support | 🚧 |
 
 ---
@@ -242,7 +243,7 @@ uv run python -m mypy backend
 - Ruff formatting
 - Ruff linting
 - Strict mypy type checking
-- 250 automated tests (249 passed, 1 skipped)
+- 254 automated tests (253 passed, 1 skipped)
 - Integration testing
 - Dependency Injection
 - Protocol-based interfaces
@@ -277,7 +278,7 @@ uv run python -m mypy backend
 ## Version 1.2
 
 - ✅ Conversation Memory
-- Streaming Responses
+- ✅ Streaming Responses
 - Docker Deployment
 - Benchmark Suite
 - Additional Embedding Providers

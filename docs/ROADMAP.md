@@ -30,7 +30,8 @@
 - Durable background ingestion complete
 - Persistent conversation memory complete
 - Hybrid document/general inference complete
-- Next: streaming chat responses
+- Streaming chat responses complete
+- Next: Docker deployment
 
 ## Phase 4: Homelab Integration
 - Move services to Docker

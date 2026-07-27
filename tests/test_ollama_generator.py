@@ -1,3 +1,4 @@
+from contextlib import nullcontext
 from typing import Any
 
 import httpx
@@ -179,3 +180,55 @@ def test_non_dictionary_payload_raises_runtime_error() -> None:
 
     with pytest.raises(RuntimeError):
         generator.generate("Hello")
+
+
+def test_stream_yields_model_tokens() -> None:
+    captured_request: dict[str, Any] = {}
+
+    def fake_stream(
+        method: str,
+        url: str,
+        *,
+        json: dict[str, Any],
+        timeout: float,
+    ) -> Any:
+        captured_request.update(
+            method=method,
+            url=url,
+            json=json,
+            timeout=timeout,
+        )
+        response = httpx.Response(
+            200,
+            content=(
+                b'{"response":"Homelab ","done":false}\n'
+                b'{"response":"AI","done":false}\n'
+                b'{"response":"","done":true}\n'
+            ),
+            request=httpx.Request("POST", url),
+        )
+        return nullcontext(response)
+
+    generator = OllamaGenerator(
+        model="test-model",
+        timeout_seconds=30.0,
+        stream_function=fake_stream,
+    )
+
+    assert list(generator.stream("Explain.")) == ["Homelab ", "AI"]
+    assert captured_request["method"] == "POST"
+    assert captured_request["json"]["stream"] is True
+
+
+def test_stream_rejects_invalid_events() -> None:
+    response = httpx.Response(
+        200,
+        content=b"not-json\n",
+        request=httpx.Request("POST", "http://localhost:11434/api/generate"),
+    )
+    generator = OllamaGenerator(
+        stream_function=lambda *args, **kwargs: nullcontext(response),
+    )
+
+    with pytest.raises(RuntimeError, match="invalid streaming response"):
+        list(generator.stream("Explain."))

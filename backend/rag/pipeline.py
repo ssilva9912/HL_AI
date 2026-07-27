@@ -1,5 +1,6 @@
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
+from typing import Protocol, cast
 
 from backend.interfaces.generator import Generator
 from backend.interfaces.retriever import RetrievalResult, Retriever
@@ -12,6 +13,18 @@ class RAGResponse:
     answer: str
     sources: list[RetrievalResult]
     answer_mode: str = "documents"
+
+
+@dataclass(frozen=True)
+class PreparedRAGRequest:
+    question: str
+    prompt: str
+    sources: list[RetrievalResult]
+    answer_mode: str
+
+
+class StreamingGenerator(Protocol):
+    def stream(self, prompt: str) -> Iterator[str]: ...
 
 
 class RAGPipeline:
@@ -43,6 +56,33 @@ class RAGPipeline:
         if not question:
             raise ValueError("question must not be empty")
 
+        prepared = self.prepare(
+            question,
+            history=history,
+            hybrid=hybrid,
+            minimum_relevance_score=minimum_relevance_score,
+        )
+        answer = self._generator.generate(prepared.prompt)
+
+        return RAGResponse(
+            question=prepared.question,
+            answer=answer,
+            sources=prepared.sources,
+            answer_mode=prepared.answer_mode,
+        )
+
+    def prepare(
+        self,
+        question: str,
+        history: Sequence[tuple[str, str]] = (),
+        *,
+        hybrid: bool = False,
+        minimum_relevance_score: float = 0.0,
+    ) -> PreparedRAGRequest:
+        question = question.strip()
+        if not question:
+            raise ValueError("question must not be empty")
+
         results = self._retriever.search(
             query=question,
             top_k=self._top_k,
@@ -52,9 +92,7 @@ class RAGPipeline:
             result for result in results if not hybrid or result.score >= minimum_relevance_score
         ]
         if hybrid and not relevant_results:
-            prompt = self._prompt_builder.build_general(
-                question=question,
-            )
+            prompt = self._prompt_builder.build_general(question=question)
             answer_mode = "general"
         else:
             prompt = self._prompt_builder.build(
@@ -64,11 +102,13 @@ class RAGPipeline:
             )
             answer_mode = "documents"
 
-        answer = self._generator.generate(prompt)
-
-        return RAGResponse(
+        return PreparedRAGRequest(
             question=question,
-            answer=answer,
+            prompt=prompt,
             sources=relevant_results,
             answer_mode=answer_mode,
         )
+
+    def stream(self, prepared: PreparedRAGRequest) -> Iterator[str]:
+        generator = cast(StreamingGenerator, self._generator)
+        yield from generator.stream(prepared.prompt)
