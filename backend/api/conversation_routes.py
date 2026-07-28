@@ -364,9 +364,7 @@ def stream_conversation_message(
             yield encode_event(
                 {
                     "type": "complete",
-                    "assistant_message": _message_response(assistant).model_dump(
-                        mode="json"
-                    ),
+                    "assistant_message": _message_response(assistant).model_dump(mode="json"),
                     "elapsed_ms": round((perf_counter() - started_at) * 1_000, 2),
                 }
             )

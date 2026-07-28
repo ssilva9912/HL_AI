@@ -205,10 +205,7 @@ def test_streamed_generation_persists_only_completed_answer() -> None:
             "complete",
         ]
         conversation = client.get(f"/conversations/{conversation_id}").json()
-        assert [
-            (message["role"], message["content"])
-            for message in conversation["messages"]
-        ] == [
+        assert [(message["role"], message["content"]) for message in conversation["messages"]] == [
             ("user", "Stream this answer."),
             ("assistant", "Streamed answer: Stream this answer."),
         ]
@@ -236,9 +233,8 @@ def test_interrupted_stream_keeps_user_without_partial_assistant() -> None:
             "detail": "Stream interrupted.",
         }
         conversation = client.get(f"/conversations/{conversation_id}").json()
-        assert [
-            (message["role"], message["content"])
-            for message in conversation["messages"]
-        ] == [("user", "Interrupt this answer.")]
+        assert [(message["role"], message["content"]) for message in conversation["messages"]] == [
+            ("user", "Interrupt this answer.")
+        ]
     finally:
         generator.close()
