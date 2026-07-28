@@ -31,7 +31,8 @@
 - Persistent conversation memory complete
 - Hybrid document/general inference complete
 - Streaming chat responses complete
-- Next: Docker deployment
+- Docker deployment complete
+- Next: network shares
 
 ## Phase 4: Homelab Integration
 - Move services to Docker

@@ -61,6 +61,7 @@ def create_demo_documents(directory: Path) -> list[Path]:
 def build_rag_pipeline(
     corpus: IndexedCorpus,
     top_k: int = 3,
+    model: str | None = None,
 ) -> RAGPipeline:
     bm25_retriever = BM25Retriever(corpus.chunks)
 
@@ -88,7 +89,7 @@ def build_rag_pipeline(
         retriever=reranking_retriever,
         prompt_builder=PromptBuilder(),
         generator=OllamaGenerator(
-            model="llama3.1:8b",
+            model=model,
             temperature=0.1,
         ),
         top_k=top_k,
