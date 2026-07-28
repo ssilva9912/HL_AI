@@ -26,7 +26,7 @@ Designed around clean architecture, dependency injection, strict typing, and com
 
 **Next Milestone**
 
-- Docker deployment
+- Network-share integration
 
 ---
 
@@ -52,7 +52,7 @@ Designed around clean architecture, dependency injection, strict typing, and com
 | Conversation Memory | ✅ |
 | Hybrid document/general inference | ✅ |
 | Streaming chat responses | ✅ |
-| Docker Support | 🚧 |
+| Docker Support | ✅ |
 
 ---
 
@@ -198,6 +198,53 @@ uv run python -m backend.demo
 
 ---
 
+# Docker Deployment
+
+The Docker stack runs PostgreSQL, the FastAPI backend, and the Streamlit
+frontend. Ollama continues to run on the host so it can use the host GPU and
+existing local models.
+
+Create the local environment file:
+
+```bash
+cp .env.example .env
+```
+
+Replace `POSTGRES_PASSWORD` in `.env` with a URL-safe random password. Verify
+that the required Ollama models are installed on the host:
+
+```bash
+ollama pull llama3.1:8b
+ollama pull nomic-embed-text
+```
+
+Build and start the stack:
+
+```bash
+docker compose up --build -d
+docker compose ps
+```
+
+Open the application at <http://127.0.0.1:8501>. The API is available at
+<http://127.0.0.1:8000>, and PostgreSQL is bound to localhost only.
+
+Useful operations:
+
+```bash
+docker compose logs -f api frontend
+docker compose restart api frontend
+docker compose down
+```
+
+Application documents, staged uploads, the embedded Qdrant index, model cache,
+and PostgreSQL data use named Docker volumes. `docker compose down` preserves
+them; `docker compose down -v` permanently removes them.
+
+On Linux, `host.docker.internal` is mapped through `host-gateway`. If Ollama is
+hosted elsewhere, set `HOMELAB_OLLAMA_URL_DOCKER` in `.env`.
+
+---
+
 # Development
 
 Run tests
@@ -279,7 +326,7 @@ uv run python -m mypy backend
 
 - ✅ Conversation Memory
 - ✅ Streaming Responses
-- Docker Deployment
+- ✅ Docker Deployment
 - Benchmark Suite
 - Additional Embedding Providers
 - Additional LLM Providers

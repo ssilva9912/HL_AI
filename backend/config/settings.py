@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     ollama_url: str = Field(
         default="http://localhost:11434",
     )
-    llm_model: str = Field(default="llama3.2")
+    llm_model: str = Field(default="llama3.1:8b")
     embedding_model: str = Field(
         default="nomic-embed-text",
     )

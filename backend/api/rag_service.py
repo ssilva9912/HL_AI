@@ -317,6 +317,7 @@ class HomelabRAGService:
         pipeline = build_rag_pipeline(
             corpus=corpus,
             top_k=resolved_top_k,
+            model=self._settings.llm_model,
         )
 
         result = pipeline.ask(
@@ -347,7 +348,11 @@ class HomelabRAGService:
         if resolved_top_k <= 0:
             raise ValueError("top_k must be positive")
 
-        pipeline = build_rag_pipeline(corpus=self._get_corpus(), top_k=resolved_top_k)
+        pipeline = build_rag_pipeline(
+            corpus=self._get_corpus(),
+            top_k=resolved_top_k,
+            model=self._settings.llm_model,
+        )
         prepared = pipeline.prepare(
             normalized_question,
             history=self._bounded_history(history or []),

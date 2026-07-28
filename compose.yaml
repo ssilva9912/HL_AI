@@ -1,22 +1,33 @@
 name: homelab-ai
 
+x-app-environment: &app-environment
+  HOMELAB_DATABASE_URL: >-
+    postgresql+psycopg://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}
+  HOMELAB_OLLAMA_URL: ${HOMELAB_OLLAMA_URL_DOCKER:-http://host.docker.internal:11434}
+  HOMELAB_LLM_MODEL: ${HOMELAB_LLM_MODEL:-llama3.1:8b}
+  HOMELAB_EMBEDDING_MODEL: ${HOMELAB_EMBEDDING_MODEL:-nomic-embed-text}
+  HOMELAB_REQUEST_TIMEOUT: ${HOMELAB_REQUEST_TIMEOUT:-120}
+  HOMELAB_EMBEDDING_TIMEOUT: ${HOMELAB_EMBEDDING_TIMEOUT:-30}
+  HOMELAB_DEFAULT_TOP_K: ${HOMELAB_DEFAULT_TOP_K:-5}
+  HOMELAB_CONVERSATION_MEMORY_MESSAGES: ${HOMELAB_CONVERSATION_MEMORY_MESSAGES:-12}
+  HOMELAB_CONVERSATION_MEMORY_CHARS: ${HOMELAB_CONVERSATION_MEMORY_CHARS:-4000}
+  HOMELAB_HYBRID_RELEVANCE_THRESHOLD: ${HOMELAB_HYBRID_RELEVANCE_THRESHOLD:-0.0}
+  HOMELAB_DOCUMENT_DIRECTORY: /app/data/documents
+  HOMELAB_STAGING_DIRECTORY: /app/data/staging
+  HOMELAB_VECTOR_STORE_PATH: /app/data/index/qdrant
+
 services:
   postgres:
     image: postgres:17-alpine
-    container_name: homelab-ai-postgres
     restart: unless-stopped
-
     environment:
       POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
       POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
-
     ports:
-      - "127.0.0.1:5432:5432"
-
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-
     healthcheck:
       test:
         [
@@ -28,5 +39,64 @@ services:
       retries: 10
       start_period: 10s
 
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: ["/bin/sh", "/app/docker/api-entrypoint.sh"]
+    environment:
+      <<: *app-environment
+      HOMELAB_API_HOST: 0.0.0.0
+      HOMELAB_API_PORT: 8000
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:${HOMELAB_API_PORT:-8000}:8000"
+    volumes:
+      - app_data:/app/data
+      - model_cache:/home/homelab/.cache
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command:
+      [
+        "streamlit",
+        "run",
+        "frontend/app.py",
+        "--server.address=0.0.0.0",
+        "--server.port=8501",
+        "--server.headless=true",
+      ]
+    environment:
+      HOMELAB_API_URL: http://api:8000
+      HOMELAB_REQUEST_TIMEOUT: ${HOMELAB_REQUEST_TIMEOUT:-120}
+      HOMELAB_DEFAULT_TOP_K: ${HOMELAB_DEFAULT_TOP_K:-5}
+    ports:
+      - "127.0.0.1:${HOMELAB_FRONTEND_PORT:-8501}:8501"
+    depends_on:
+      api:
+        condition: service_healthy
+
 volumes:
   postgres_data:
+  app_data:
+  model_cache:
