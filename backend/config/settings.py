@@ -113,6 +113,17 @@ class Settings(BaseSettings):
         description=("Directory containing uploads awaiting ingestion."),
     )
 
+    network_share_name: str = Field(
+        default="Local document share",
+        min_length=1,
+        description=("Friendly name recorded for the configured read-only share."),
+    )
+
+    network_share_directory: Path | None = Field(
+        default=None,
+        description=("Optional read-only directory scanned for documents."),
+    )
+
     abandoned_ingestion_job_seconds: int = Field(
         default=60 * 60,
         ge=60,

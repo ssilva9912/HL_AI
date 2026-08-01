@@ -7,12 +7,14 @@ from uuid import UUID, uuid4
 from sqlalchemy import (
     JSON,
     BigInteger,
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
     Integer,
     String,
     Text,
+    UniqueConstraint,
     Uuid,
     func,
 )
@@ -58,6 +60,22 @@ class MessageRole(StrEnum):
     ASSISTANT = "assistant"
 
 
+class NetworkShareStatus(StrEnum):
+    NEVER_SYNCED = "never_synced"
+    SYNCING = "syncing"
+    READY = "ready"
+    UNAVAILABLE = "unavailable"
+    FAILED = "failed"
+
+
+class NetworkShareFileStatus(StrEnum):
+    DISCOVERED = "discovered"
+    QUEUED = "queued"
+    SYNCED = "synced"
+    MISSING = "missing"
+    FAILED = "failed"
+
+
 document_status_type = SqlEnum(
     DocumentStatus,
     name="document_status",
@@ -97,6 +115,24 @@ ingestion_stage_type = SqlEnum(
 message_role_type = SqlEnum(
     MessageRole,
     name="message_role",
+    native_enum=False,
+    create_constraint=True,
+    validate_strings=True,
+    values_callable=lambda enum_type: [member.value for member in enum_type],
+)
+
+network_share_status_type = SqlEnum(
+    NetworkShareStatus,
+    name="network_share_status",
+    native_enum=False,
+    create_constraint=True,
+    validate_strings=True,
+    values_callable=lambda enum_type: [member.value for member in enum_type],
+)
+
+network_share_file_status_type = SqlEnum(
+    NetworkShareFileStatus,
+    name="network_share_file_status",
     native_enum=False,
     create_constraint=True,
     validate_strings=True,
@@ -187,6 +223,172 @@ class Document(Base):
         back_populates="document",
         cascade="all, delete-orphan",
         passive_deletes=True,
+    )
+
+    network_share_files: Mapped[list[NetworkShareFile]] = relationship(
+        back_populates="document",
+    )
+
+
+class NetworkShareSource(Base):
+    __tablename__ = "network_share_sources"
+
+    id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+
+    name: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        unique=True,
+    )
+
+    root_path: Mapped[str] = mapped_column(
+        String(1024),
+        nullable=False,
+        unique=True,
+    )
+
+    enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default="true",
+    )
+
+    status: Mapped[NetworkShareStatus] = mapped_column(
+        network_share_status_type,
+        nullable=False,
+        default=NetworkShareStatus.NEVER_SYNCED,
+        server_default=NetworkShareStatus.NEVER_SYNCED.value,
+    )
+
+    last_error: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    last_scan_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    last_scan_completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    files: Mapped[list[NetworkShareFile]] = relationship(
+        back_populates="source",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+
+class NetworkShareFile(Base):
+    __tablename__ = "network_share_files"
+    __table_args__ = (
+        UniqueConstraint(
+            "source_id",
+            "relative_path",
+            name="uq_network_share_file_source_path",
+        ),
+        CheckConstraint(
+            "size_bytes >= 0",
+            name="network_share_file_size_bytes_nonnegative",
+        ),
+        CheckConstraint(
+            "modified_time_ns >= 0",
+            name="network_share_file_modified_time_nonnegative",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+
+    source_id: Mapped[UUID] = mapped_column(
+        ForeignKey("network_share_sources.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    document_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("documents.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    relative_path: Mapped[str] = mapped_column(
+        String(1024),
+        nullable=False,
+    )
+
+    checksum_sha256: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        index=True,
+    )
+
+    size_bytes: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+    )
+
+    modified_time_ns: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+    )
+
+    status: Mapped[NetworkShareFileStatus] = mapped_column(
+        network_share_file_status_type,
+        nullable=False,
+        default=NetworkShareFileStatus.DISCOVERED,
+        server_default=NetworkShareFileStatus.DISCOVERED.value,
+    )
+
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        index=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    source: Mapped[NetworkShareSource] = relationship(back_populates="files")
+    document: Mapped[Document | None] = relationship(
+        back_populates="network_share_files",
     )
 
 
