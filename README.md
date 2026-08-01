@@ -228,6 +228,11 @@ docker compose ps
 Open the application at <http://127.0.0.1:8501>. The API is available at
 <http://127.0.0.1:8000>, and PostgreSQL is bound to localhost only.
 
+A Caddy reverse proxy is also included, listening on port 80 and bound to all
+network interfaces so other devices on your LAN can reach the frontend at
+`http://<host-ip>/`. Set `HOMELAB_PROXY_PORT` in `.env` to change its port.
+The proxy has no authentication yet; only run it on a trusted network.
+
 Useful operations:
 
 ```bash
