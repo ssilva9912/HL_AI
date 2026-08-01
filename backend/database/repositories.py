@@ -14,6 +14,10 @@ from backend.database.models import (
     IngestionOperation,
     IngestionStage,
     MessageRole,
+    NetworkShareFile,
+    NetworkShareFileStatus,
+    NetworkShareSource,
+    NetworkShareStatus,
 )
 
 
@@ -171,6 +175,134 @@ class DocumentRepository:
     def delete(self, document: Document) -> None:
         self._session.delete(document)
         self._session.flush()
+
+
+class NetworkShareSourceRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def get_or_create(self, *, name: str, root_path: str) -> NetworkShareSource:
+        normalized_name = name.strip()
+        normalized_root = root_path.strip()
+        if not normalized_name:
+            raise ValueError("Network-share name cannot be empty.")
+        if not normalized_root:
+            raise ValueError("Network-share root path cannot be empty.")
+
+        source = self._session.scalar(
+            select(NetworkShareSource).where(NetworkShareSource.name == normalized_name)
+        )
+        if source is None:
+            source = NetworkShareSource(name=normalized_name, root_path=normalized_root)
+            self._session.add(source)
+            self._session.flush()
+        elif source.root_path != normalized_root:
+            source.root_path = normalized_root
+            self._session.flush()
+        return source
+
+    def update_scan_status(
+        self,
+        source: NetworkShareSource,
+        *,
+        status: NetworkShareStatus,
+        started_at: datetime | None = None,
+        completed_at: datetime | None = None,
+        error: str | None = None,
+    ) -> NetworkShareSource:
+        source.status = status
+        source.last_error = error
+        if started_at is not None:
+            source.last_scan_started_at = started_at
+        if completed_at is not None:
+            source.last_scan_completed_at = completed_at
+        self._session.flush()
+        return source
+
+
+class NetworkShareFileRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def get_by_relative_path(
+        self,
+        source_id: UUID,
+        relative_path: str,
+    ) -> NetworkShareFile | None:
+        return self._session.scalar(
+            select(NetworkShareFile).where(
+                NetworkShareFile.source_id == source_id,
+                NetworkShareFile.relative_path == relative_path,
+            )
+        )
+
+    def record_seen(
+        self,
+        *,
+        source: NetworkShareSource,
+        relative_path: str,
+        checksum_sha256: str,
+        size_bytes: int,
+        modified_time_ns: int,
+        seen_at: datetime,
+    ) -> tuple[NetworkShareFile, bool, bool]:
+        normalized_path = relative_path.strip().replace("\\", "/")
+        if not normalized_path or normalized_path.startswith("/"):
+            raise ValueError("A safe share-relative path is required.")
+        if size_bytes < 0 or modified_time_ns < 0:
+            raise ValueError("File size and modification time cannot be negative.")
+
+        tracked = self.get_by_relative_path(source.id, normalized_path)
+        validated_checksum = _validate_sha256(checksum_sha256)
+        is_new = tracked is None
+        if tracked is None:
+            changed = True
+            tracked = NetworkShareFile(
+                source=source,
+                relative_path=normalized_path,
+                checksum_sha256=validated_checksum,
+                size_bytes=size_bytes,
+                modified_time_ns=modified_time_ns,
+                status=NetworkShareFileStatus.DISCOVERED,
+                last_seen_at=seen_at,
+            )
+            self._session.add(tracked)
+        else:
+            changed = (
+                tracked.checksum_sha256 != validated_checksum
+                or tracked.status is NetworkShareFileStatus.MISSING
+            )
+            tracked.checksum_sha256 = validated_checksum
+            tracked.size_bytes = size_bytes
+            tracked.modified_time_ns = modified_time_ns
+            tracked.last_seen_at = seen_at
+            tracked.last_error = None
+            if changed or tracked.status is NetworkShareFileStatus.MISSING:
+                tracked.status = NetworkShareFileStatus.DISCOVERED
+        self._session.flush()
+        return tracked, is_new, changed
+
+    def mark_unseen_missing(
+        self,
+        *,
+        source_id: UUID,
+        seen_paths: set[str],
+    ) -> int:
+        tracked_files = list(
+            self._session.scalars(
+                select(NetworkShareFile).where(NetworkShareFile.source_id == source_id)
+            )
+        )
+        marked = 0
+        for tracked in tracked_files:
+            if (
+                tracked.relative_path not in seen_paths
+                and tracked.status is not NetworkShareFileStatus.MISSING
+            ):
+                tracked.status = NetworkShareFileStatus.MISSING
+                marked += 1
+        self._session.flush()
+        return marked
 
 
 class IngestionJobRepository:

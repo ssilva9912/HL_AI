@@ -37,3 +37,16 @@ class IngestionJobResponse(BaseModel):
     started_at: datetime | None
     completed_at: datetime | None
     updated_at: datetime
+
+
+class NetworkShareScanResponse(BaseModel):
+    source_id: UUID
+    source_name: str
+    root_path: str
+    status: str
+    discovered: int
+    changed: int
+    unchanged: int
+    missing: int
+    unsupported: int
+    unsafe: int

@@ -14,10 +14,12 @@ from fastapi import (
 from sqlalchemy.orm import Session
 
 from backend.api.dependencies import (
+    get_network_share_scanner,
     get_queued_ingestion_service,
 )
 from backend.api.ingestion_schemas import (
     IngestionJobResponse,
+    NetworkShareScanResponse,
     QueuedIngestionResponse,
     RetriedIngestionResponse,
 )
@@ -30,6 +32,7 @@ from backend.api.rag_service import (
     InvalidDocumentNameError,
     UnsupportedDocumentTypeError,
 )
+from backend.config import Settings, get_settings
 from backend.database import (
     IngestionJobRepository,
     get_database_session,
@@ -42,10 +45,48 @@ from backend.database.ingestion_retry import (
     IngestionJobNotRetryableError,
     IngestionPayloadUnavailableError,
 )
+from backend.network_share import NetworkShareScanner
+from backend.network_share.scanner import NetworkShareUnavailableError
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+@router.post(
+    "/network-share/sync",
+    response_model=NetworkShareScanResponse,
+    tags=["network-share"],
+)
+def sync_network_share(
+    scanner: Annotated[NetworkShareScanner, Depends(get_network_share_scanner)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> NetworkShareScanResponse:
+    root_path = settings.network_share_directory
+    if root_path is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="HOMELAB_NETWORK_SHARE_DIRECTORY is not configured.",
+        )
+    try:
+        result = scanner.scan(name=settings.network_share_name, root_path=root_path)
+    except NetworkShareUnavailableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+    return NetworkShareScanResponse(
+        source_id=result.source_id,
+        source_name=settings.network_share_name,
+        root_path=str(root_path),
+        status="ready",
+        discovered=result.discovered,
+        changed=result.changed,
+        unchanged=result.unchanged,
+        missing=result.missing,
+        unsupported=result.unsupported,
+        unsafe=result.unsafe,
+    )
 
 
 @router.post(

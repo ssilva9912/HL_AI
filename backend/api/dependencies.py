@@ -6,6 +6,7 @@ from backend.api.queued_ingestion_service import (
 from backend.api.rag_service import HomelabRAGService
 from backend.config import get_settings
 from backend.database import get_session_factory
+from backend.network_share import NetworkShareScanner
 
 
 @lru_cache(maxsize=1)
@@ -31,3 +32,8 @@ def get_queued_ingestion_service() -> QueuedDocumentIngestionService:
         rag_service=get_rag_service(),
         session_factory=get_session_factory(),
     )
+
+
+@lru_cache(maxsize=1)
+def get_network_share_scanner() -> NetworkShareScanner:
+    return NetworkShareScanner(session_factory=get_session_factory())

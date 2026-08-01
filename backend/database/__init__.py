@@ -25,6 +25,10 @@ from backend.database.models import (
     IngestionPayload,
     IngestionStage,
     MessageRole,
+    NetworkShareFile,
+    NetworkShareFileStatus,
+    NetworkShareSource,
+    NetworkShareStatus,
 )
 from backend.database.payload_repository import (
     IngestionPayloadRepository,
@@ -38,6 +42,8 @@ from backend.database.repositories import (
     ConversationRepository,
     DocumentRepository,
     IngestionJobRepository,
+    NetworkShareFileRepository,
+    NetworkShareSourceRepository,
 )
 from backend.database.session import (
     DatabaseNotConfiguredError,
@@ -71,6 +77,12 @@ __all__ = [
     "IngestionPayloadRepository",
     "IngestionQueue",
     "MessageRole",
+    "NetworkShareFile",
+    "NetworkShareFileRepository",
+    "NetworkShareFileStatus",
+    "NetworkShareSource",
+    "NetworkShareSourceRepository",
+    "NetworkShareStatus",
     "QueuedIngestion",
     "QueuedIngestionWorker",
     "active_ingestion_job_index",

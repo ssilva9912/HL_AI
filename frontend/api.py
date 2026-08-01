@@ -91,6 +91,20 @@ class QueuedUpload:
 
 
 @dataclass(frozen=True)
+class NetworkShareScan:
+    source_id: str
+    source_name: str
+    root_path: str
+    status: str
+    discovered: int
+    changed: int
+    unchanged: int
+    missing: int
+    unsupported: int
+    unsafe: int
+
+
+@dataclass(frozen=True)
 class IngestionJob:
     id: str
     document_id: str
@@ -543,6 +557,21 @@ class HomelabAPIClient:
                     f"/ingestion-jobs/{response.get('job_id', '')}",
                 ),
             ),
+        )
+
+    def sync_network_share(self) -> NetworkShareScan:
+        response = self._request(method="POST", path="/network-share/sync")
+        return NetworkShareScan(
+            source_id=str(response.get("source_id", "")),
+            source_name=str(response.get("source_name", "")),
+            root_path=str(response.get("root_path", "")),
+            status=str(response.get("status", "unknown")),
+            discovered=int(response.get("discovered", 0)),
+            changed=int(response.get("changed", 0)),
+            unchanged=int(response.get("unchanged", 0)),
+            missing=int(response.get("missing", 0)),
+            unsupported=int(response.get("unsupported", 0)),
+            unsafe=int(response.get("unsafe", 0)),
         )
 
     def get_ingestion_job(

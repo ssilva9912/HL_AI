@@ -428,6 +428,29 @@ def render_documents_tab(
         "Queue documents for durable background parsing, embedding, and indexing.",
     )
 
+    with st.container(border=True):
+        st.markdown("#### Read-only network share")
+        st.caption(
+            "Sync now inventories supported files. It does not ingest, modify, or "
+            "delete files yet.",
+        )
+        if st.button("Sync now", key="sync_network_share"):
+            try:
+                scan = client.sync_network_share()
+            except HomelabAPIError as exc:
+                st.error(f"Network-share scan failed: {exc}")
+            else:
+                st.success(f"Scanned {scan.source_name} ({scan.root_path}).")
+                st.write(
+                    f"New: **{scan.discovered}** · Changed: **{scan.changed}** · "
+                    f"Unchanged: **{scan.unchanged}** · Missing: **{scan.missing}**"
+                )
+                if scan.unsupported or scan.unsafe:
+                    st.caption(
+                        f"Skipped unsupported: {scan.unsupported} · "
+                        f"Skipped unsafe links: {scan.unsafe}"
+                    )
+
     uploaded_files = st.file_uploader(
         label="Choose documents",
         type=[
