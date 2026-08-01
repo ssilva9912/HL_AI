@@ -25,6 +25,7 @@ def get_engine() -> Engine:
         settings.database_url.get_secret_value(),
         pool_pre_ping=True,
         echo=settings.database_echo,
+        connect_args={"connect_timeout": 5},
     )
 
 
