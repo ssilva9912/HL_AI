@@ -1,14 +1,17 @@
 import logging
 import mimetypes
 from collections.abc import Callable, Iterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from hashlib import sha256
 from pathlib import Path
+from threading import Lock, RLock
+from time import perf_counter
 from typing import Any
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from backend.cache import LRUCache
 from backend.chunking.semantic_chunker import SemanticChunker
 from backend.config import Settings, get_settings
 from backend.database import (
@@ -27,7 +30,17 @@ from backend.indexing.indexer import Indexer
 from backend.indexing.models import IndexedCorpus
 from backend.interfaces.embedder import EmbeddedChunk
 from backend.interfaces.parser import ParsedDocument
+from backend.interfaces.retriever import RetrievalResult
+from backend.llm.ollama_generator import OllamaGenerator
+from backend.observability import RequestTrace, observe_stream, stage, use_trace
+from backend.observability.metrics import CACHE_EVENTS, RAG_CORPUS_CHUNKS, RAG_REQUESTS
+from backend.rag.pipeline import RAGPipeline
+from backend.retrieval.bm25_retriever import BM25Retriever
+from backend.retrieval.cross_encoder_reranker import CrossEncoderReranker
 from backend.storage.qdrant_vector_store import QdrantVectorStore
+from backend.web.safe_http import PageFetcher
+from backend.web.search import SearxngClient
+from backend.web.web_retriever import WebRetriever
 from evaluation.dataset import load_evaluation_dataset
 from evaluation.evaluator import (
     EvaluationReport,
@@ -74,6 +87,10 @@ class UnsafeDocumentPathError(RuntimeError):
     pass
 
 
+class WebSearchNotConfiguredError(RuntimeError):
+    pass
+
+
 @dataclass(frozen=True)
 class RAGSource:
     text: str
@@ -87,6 +104,7 @@ class RAGAnswer:
     answer: str
     sources: list[RAGSource]
     answer_mode: str = "documents"
+    stages_ms: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -111,6 +129,7 @@ class RAGStream:
     chunks: Iterator[str]
     sources: list[RAGSource]
     answer_mode: str
+    trace: RequestTrace | None = None
 
 
 class HomelabRAGService:
@@ -155,6 +174,33 @@ class HomelabRAGService:
 
         self._vector_store: QdrantVectorStore | None = None
         self._corpus: IndexedCorpus | None = None
+        self._corpus_lock = RLock()
+
+        # Shared across requests: the cross-encoder and Ollama client are expensive to
+        # create, and the BM25 index, caches and pipelines are only valid for one corpus.
+        self._pipeline_lock = Lock()
+        self._reranker = CrossEncoderReranker()
+        self._generator = OllamaGenerator(
+            model=self._settings.llm_model,
+            base_url=self._settings.ollama_url,
+            timeout_seconds=self._settings.request_timeout,
+            temperature=0.1,
+            keep_alive=self._settings.ollama_keep_alive,
+            num_predict=self._settings.ollama_num_predict,
+        )
+        self._embedding_cache: LRUCache[str, list[float]] = LRUCache(
+            "query_embedding",
+            self._settings.query_cache_size,
+        )
+        self._pipeline_corpus: IndexedCorpus | None = None
+        self._pipelines: dict[tuple[int, bool], RAGPipeline] = {}
+        self._web_retriever: WebRetriever | None = None
+        self._bm25_retriever: BM25Retriever | None = None
+        self._retrieval_cache: LRUCache[tuple[str, int], tuple[RetrievalResult, ...]] = LRUCache(
+            "retrieval",
+            self._settings.query_cache_size,
+            self._settings.query_cache_ttl_seconds,
+        )
 
     @property
     def max_upload_bytes(self) -> int:
@@ -180,6 +226,7 @@ class HomelabRAGService:
             base_url=self._settings.ollama_url,
             timeout=self._settings.embedding_timeout,
             batch_size=self._settings.embedding_batch_size,
+            keep_alive=self._settings.ollama_keep_alive,
             progress_callback=(
                 (
                     lambda processed, total: progress_callback(
@@ -282,13 +329,125 @@ class HomelabRAGService:
         if self._corpus is not None:
             return self._corpus
 
-        persisted_corpus = self._load_persisted_corpus()
+        with self._corpus_lock:
+            if self._corpus is not None:
+                return self._corpus
 
-        if persisted_corpus is not None:
-            self._corpus = persisted_corpus
-            return persisted_corpus
+            with stage("corpus_load"):
+                persisted_corpus = self._load_persisted_corpus()
 
-        return self._rebuild_corpus()
+                if persisted_corpus is not None:
+                    self._corpus = persisted_corpus
+                    RAG_CORPUS_CHUNKS.set(persisted_corpus.chunk_count)
+                    return persisted_corpus
+
+                corpus = self._rebuild_corpus()
+                RAG_CORPUS_CHUNKS.set(corpus.chunk_count)
+                return corpus
+
+    def _get_web_retriever(self) -> WebRetriever:
+        if self._web_retriever is None:
+            search_url = self._settings.web_search_url
+            if search_url is None or not search_url.strip():
+                raise WebSearchNotConfiguredError(
+                    "Web search is not configured. Set HOMELAB_WEB_SEARCH_URL to a SearXNG "
+                    "instance (see the README) or turn web search off.",
+                )
+
+            self._web_retriever = WebRetriever(
+                search_client=SearxngClient(search_url, timeout=self._settings.web_fetch_timeout),
+                fetcher=PageFetcher(
+                    timeout=self._settings.web_fetch_timeout,
+                    max_bytes=self._settings.web_max_page_bytes,
+                    max_chars=self._settings.web_max_page_chars,
+                ),
+                chunker=self._create_chunker(),
+                max_results=self._settings.web_max_results,
+                cache=LRUCache(
+                    "web_pages",
+                    self._settings.query_cache_size,
+                    self._settings.web_cache_ttl_seconds,
+                ),
+            )
+
+        return self._web_retriever
+
+    def _get_pipeline(
+        self,
+        corpus: IndexedCorpus,
+        top_k: int,
+        web: bool = False,
+    ) -> RAGPipeline:
+        """
+        Return the pipeline for this corpus snapshot, top_k and web mode, building it once.
+
+        Ingesting or deleting a document replaces the corpus object, which drops
+        the BM25 index, retrieval cache and pipelines built for the old one. Web
+        pipelines add the live-web retriever and skip the retrieval-result cache,
+        because web content changes; the web retriever caches its own page fetches.
+        """
+
+        with self._pipeline_lock:
+            if self._pipeline_corpus is not corpus:
+                self._pipeline_corpus = corpus
+                self._pipelines = {}
+                self._bm25_retriever = None
+                self._retrieval_cache.clear()
+
+            pipeline = self._pipelines.get((top_k, web))
+            if pipeline is not None:
+                CACHE_EVENTS.labels(cache="pipeline", result="hit").inc()
+                return pipeline
+
+            CACHE_EVENTS.labels(cache="pipeline", result="miss").inc()
+            extra_retrievers = [self._get_web_retriever()] if web else []
+            with stage("pipeline_build"):
+                if self._bm25_retriever is None:
+                    self._bm25_retriever = BM25Retriever(corpus.chunks)
+
+                pipeline = build_rag_pipeline(
+                    corpus=corpus,
+                    top_k=top_k,
+                    bm25_retriever=self._bm25_retriever,
+                    reranker=self._reranker,
+                    generator=self._generator,
+                    embedding_cache=self._embedding_cache,
+                    retrieval_cache=None if web else self._retrieval_cache,
+                    extra_retrievers=extra_retrievers,
+                )
+            self._pipelines[(top_k, web)] = pipeline
+            return pipeline
+
+    def warm_up(self) -> None:
+        """
+        Pay the one-time start-up costs before the first question arrives.
+
+        Loads the corpus and BM25 index, the cross-encoder, and both Ollama
+        models. Each step is independent: one failing (for example Ollama not
+        running yet) is logged and does not stop the others.
+        """
+
+        steps: list[tuple[str, Callable[[], object]]] = [
+            (
+                "corpus",
+                lambda: self._get_pipeline(self._get_corpus(), self._settings.default_top_k),
+            ),
+            ("reranker", self._reranker.warm_up),
+            ("language model", self._generator.preload),
+            ("embedding model", lambda: self._create_embedder().embed_text("warm up")),
+        ]
+        for name, step in steps:
+            started_at = perf_counter()
+            try:
+                step()
+            except Exception:
+                logger.warning("Warm-up of %s failed", name, exc_info=True)
+            else:
+                logger.info(
+                    "Warm-up of %s finished in %.0f ms",
+                    name,
+                    (perf_counter() - started_at) * 1_000,
+                )
 
     def ask(
         self,
@@ -297,6 +456,7 @@ class HomelabRAGService:
         history: list[tuple[str, str]] | None = None,
         *,
         hybrid: bool = False,
+        web: bool = False,
     ) -> RAGAnswer:
         normalized_question = question.strip()
 
@@ -312,25 +472,27 @@ class HomelabRAGService:
                 "top_k must be positive",
             )
 
-        corpus = self._get_corpus()
+        trace = RequestTrace()
+        try:
+            with use_trace(trace):
+                pipeline = self._get_pipeline(self._get_corpus(), resolved_top_k, web)
+                result = pipeline.ask(
+                    normalized_question,
+                    history=self._bounded_history(history or []),
+                    hybrid=hybrid,
+                    minimum_relevance_score=self._settings.hybrid_relevance_threshold,
+                )
+        except Exception:
+            RAG_REQUESTS.labels(endpoint="ask", answer_mode="unknown", outcome="error").inc()
+            raise
 
-        pipeline = build_rag_pipeline(
-            corpus=corpus,
-            top_k=resolved_top_k,
-            model=self._settings.llm_model,
-        )
-
-        result = pipeline.ask(
-            normalized_question,
-            history=self._bounded_history(history or []),
-            hybrid=hybrid,
-            minimum_relevance_score=self._settings.hybrid_relevance_threshold,
-        )
+        RAG_REQUESTS.labels(endpoint="ask", answer_mode=result.answer_mode, outcome="ok").inc()
 
         return RAGAnswer(
             answer=result.answer,
             sources=[self._normalize_source(source) for source in result.sources],
             answer_mode=result.answer_mode,
+            stages_ms=trace.stages_ms(),
         )
 
     def stream_answer(
@@ -340,6 +502,7 @@ class HomelabRAGService:
         history: list[tuple[str, str]] | None = None,
         *,
         hybrid: bool = False,
+        web: bool = False,
     ) -> RAGStream:
         normalized_question = question.strip()
         if not normalized_question:
@@ -348,21 +511,30 @@ class HomelabRAGService:
         if resolved_top_k <= 0:
             raise ValueError("top_k must be positive")
 
-        pipeline = build_rag_pipeline(
-            corpus=self._get_corpus(),
-            top_k=resolved_top_k,
-            model=self._settings.llm_model,
-        )
-        prepared = pipeline.prepare(
-            normalized_question,
-            history=self._bounded_history(history or []),
-            hybrid=hybrid,
-            minimum_relevance_score=self._settings.hybrid_relevance_threshold,
-        )
+        trace = RequestTrace()
+        try:
+            with use_trace(trace):
+                pipeline = self._get_pipeline(self._get_corpus(), resolved_top_k, web)
+                prepared = pipeline.prepare(
+                    normalized_question,
+                    history=self._bounded_history(history or []),
+                    hybrid=hybrid,
+                    minimum_relevance_score=self._settings.hybrid_relevance_threshold,
+                )
+        except Exception:
+            RAG_REQUESTS.labels(endpoint="stream", answer_mode="unknown", outcome="error").inc()
+            raise
+
         return RAGStream(
-            chunks=pipeline.stream(prepared),
+            chunks=observe_stream(
+                pipeline.stream(prepared),
+                trace,
+                endpoint="stream",
+                answer_mode=prepared.answer_mode,
+            ),
             sources=[self._normalize_source(source) for source in prepared.sources],
             answer_mode=prepared.answer_mode,
+            trace=trace,
         )
 
     def _bounded_history(

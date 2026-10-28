@@ -19,6 +19,7 @@ class FakeRAGService:
         self,
         question: str,
         top_k: int = 5,
+        web: bool = False,
     ) -> RAGAnswer:
         return RAGAnswer(
             answer=f"Test answer for: {question}",

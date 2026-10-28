@@ -1,10 +1,12 @@
 from collections.abc import Callable
+from time import perf_counter
 from typing import Any
 
 import httpx
 
 from backend.interfaces.chunker import DocumentChunk
 from backend.interfaces.embedder import EmbeddedChunk
+from backend.observability.metrics import OLLAMA_REQUEST_DURATION, OLLAMA_REQUESTS
 
 
 class OllamaEmbedder:
@@ -15,6 +17,7 @@ class OllamaEmbedder:
         timeout: float = 30.0,
         batch_size: int = 8,
         progress_callback: Callable[[int, int], None] | None = None,
+        keep_alive: str = "30m",
     ) -> None:
         if not model.strip():
             raise ValueError("model must not be empty")
@@ -33,6 +36,7 @@ class OllamaEmbedder:
         self._timeout = timeout
         self._batch_size = batch_size
         self._progress_callback = progress_callback
+        self._keep_alive = keep_alive
 
     def embed_text(
         self,
@@ -101,16 +105,24 @@ class OllamaEmbedder:
         if any(not text.strip() for text in texts):
             raise ValueError("embedding input must not contain empty text")
 
-        response = httpx.post(
-            f"{self._base_url}/api/embed",
-            json={
-                "model": self._model,
-                "input": texts,
-            },
-            timeout=self._timeout,
-        )
+        started_at = perf_counter()
+        outcome = "error"
+        try:
+            response = httpx.post(
+                f"{self._base_url}/api/embed",
+                json={
+                    "model": self._model,
+                    "input": texts,
+                    "keep_alive": self._keep_alive,
+                },
+                timeout=self._timeout,
+            )
 
-        response.raise_for_status()
+            response.raise_for_status()
+            outcome = "ok"
+        finally:
+            OLLAMA_REQUESTS.labels(operation="embed", outcome=outcome).inc()
+            OLLAMA_REQUEST_DURATION.labels(operation="embed").observe(perf_counter() - started_at)
 
         embeddings = self._parse_embeddings(response.json())
 

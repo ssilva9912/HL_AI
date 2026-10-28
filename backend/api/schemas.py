@@ -16,6 +16,10 @@ class SearchRequest(BaseModel):
         le=20,
         description="Maximum number of retrieved sources.",
     )
+    web: bool = Field(
+        default=False,
+        description="Also search the live web. Sends the question to the configured search engine.",
+    )
 
 
 class SourceResponse(BaseModel):
@@ -29,6 +33,10 @@ class SearchMetadata(BaseModel):
     top_k: int
     source_count: int
     elapsed_ms: float
+    stages_ms: dict[str, float] = Field(
+        default_factory=dict,
+        description="Leaf stage timings in milliseconds; they need not sum to elapsed_ms.",
+    )
 
 
 class SearchResponse(BaseModel):
@@ -139,6 +147,10 @@ class ConversationMessageRequest(BaseModel):
         default=5,
         ge=1,
         le=20,
+    )
+    web: bool = Field(
+        default=False,
+        description="Also search the live web. Sends the question to the configured search engine.",
     )
 
 

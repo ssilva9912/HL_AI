@@ -369,6 +369,7 @@ class HomelabAPIClient:
         conversation_id: str,
         content: str,
         top_k: int,
+        web: bool = False,
     ) -> Iterator[dict[str, Any]]:
         url = f"{self.base_url}/conversations/{conversation_id}/messages/stream"
         try:
@@ -376,7 +377,7 @@ class HomelabAPIClient:
                 with client.stream(
                     "POST",
                     url,
-                    json={"content": content, "top_k": top_k},
+                    json={"content": content, "top_k": top_k, "web": web},
                 ) as response:
                     response.raise_for_status()
                     for line in response.iter_lines():

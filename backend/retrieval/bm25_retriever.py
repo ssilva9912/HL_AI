@@ -4,6 +4,7 @@ from rank_bm25 import BM25Okapi
 
 from backend.interfaces.chunker import DocumentChunk
 from backend.interfaces.retriever import RetrievalResult
+from backend.observability import stage
 from backend.retrieval.tokenizer import tokenize
 
 
@@ -34,14 +35,15 @@ class BM25Retriever:
         if self._index is None:
             return []
 
-        query_tokens = self._tokenizer(query)
-        scores = self._index.get_scores(query_tokens)
+        with stage("retrieval.bm25"):
+            query_tokens = self._tokenizer(query)
+            scores = self._index.get_scores(query_tokens)
 
-        ranked_indices = sorted(
-            range(len(self._chunks)),
-            key=lambda index: float(scores[index]),
-            reverse=True,
-        )
+            ranked_indices = sorted(
+                range(len(self._chunks)),
+                key=lambda index: float(scores[index]),
+                reverse=True,
+            )
 
         results: list[RetrievalResult] = []
 

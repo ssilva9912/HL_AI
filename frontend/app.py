@@ -294,6 +294,15 @@ def render_sidebar(
             help=("Controls how many reranked passages are returned with each answer."),
         )
 
+        st.checkbox(
+            "Search the web",
+            key="web_search",
+            help=(
+                "Also looks up current information online. Your question is sent to the "
+                "configured search engine, and page text is treated as untrusted."
+            ),
+        )
+
         st.divider()
 
         status = st.session_state.backend_status
@@ -372,6 +381,7 @@ def render_chat_tab(
                 conversation_id=conversation_id,
                 content=cleaned_question,
                 top_k=top_k,
+                web=bool(st.session_state.get("web_search", False)),
             ):
                 event_type = str(event.get("type", ""))
                 if event_type == "token":

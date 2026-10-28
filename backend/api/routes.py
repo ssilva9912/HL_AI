@@ -284,6 +284,7 @@ def search(
         result = rag_service.ask(
             question=question,
             top_k=request.top_k,
+            web=request.web,
         )
     except RuntimeError as exc:
         logger.exception(
@@ -322,6 +323,7 @@ def search(
         request.top_k,
         len(sources),
         elapsed_ms,
+        extra={"stages_ms": result.stages_ms},
     )
 
     return SearchResponse(
@@ -334,6 +336,7 @@ def search(
                 elapsed_ms,
                 2,
             ),
+            stages_ms=result.stages_ms,
         ),
     )
 

@@ -4,6 +4,8 @@ from typing import Protocol, cast
 
 from backend.interfaces.generator import Generator
 from backend.interfaces.retriever import RetrievalResult, Retriever
+from backend.observability import stage
+from backend.observability.metrics import RAG_PROMPT_CHARS
 from backend.rag.prompt_builder import PromptBuilder
 
 
@@ -62,7 +64,8 @@ class RAGPipeline:
             hybrid=hybrid,
             minimum_relevance_score=minimum_relevance_score,
         )
-        answer = self._generator.generate(prepared.prompt)
+        with stage("generation"):
+            answer = self._generator.generate(prepared.prompt)
 
         return RAGResponse(
             question=prepared.question,
@@ -91,16 +94,18 @@ class RAGPipeline:
         relevant_results = [
             result for result in results if not hybrid or result.score >= minimum_relevance_score
         ]
-        if hybrid and not relevant_results:
-            prompt = self._prompt_builder.build_general(question=question)
-            answer_mode = "general"
-        else:
-            prompt = self._prompt_builder.build(
-                question=question,
-                results=relevant_results,
-                history=history,
-            )
-            answer_mode = "documents"
+        with stage("prompt_build"):
+            if hybrid and not relevant_results:
+                prompt = self._prompt_builder.build_general(question=question)
+                answer_mode = "general"
+            else:
+                prompt = self._prompt_builder.build(
+                    question=question,
+                    results=relevant_results,
+                    history=history,
+                )
+                answer_mode = "documents"
+        RAG_PROMPT_CHARS.observe(len(prompt))
 
         return PreparedRAGRequest(
             question=question,

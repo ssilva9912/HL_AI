@@ -15,6 +15,17 @@ x-app-environment: &app-environment
   HOMELAB_DOCUMENT_DIRECTORY: /app/data/documents
   HOMELAB_STAGING_DIRECTORY: /app/data/staging
   HOMELAB_VECTOR_STORE_PATH: /app/data/index/qdrant
+  HOMELAB_OLLAMA_KEEP_ALIVE: ${HOMELAB_OLLAMA_KEEP_ALIVE:-30m}
+  HOMELAB_OLLAMA_NUM_PREDICT: ${HOMELAB_OLLAMA_NUM_PREDICT:-1024}
+  HOMELAB_WEB_SEARCH_URL: ${HOMELAB_WEB_SEARCH_URL-http://searxng:8080}
+  HOMELAB_WEB_MAX_RESULTS: ${HOMELAB_WEB_MAX_RESULTS:-4}
+  HOMELAB_WEB_FETCH_TIMEOUT: ${HOMELAB_WEB_FETCH_TIMEOUT:-8}
+  HOMELAB_WEB_MAX_PAGE_BYTES: ${HOMELAB_WEB_MAX_PAGE_BYTES:-1000000}
+  HOMELAB_WARMUP_ON_STARTUP: ${HOMELAB_WARMUP_ON_STARTUP:-true}
+  HOMELAB_QUERY_CACHE_SIZE: ${HOMELAB_QUERY_CACHE_SIZE:-256}
+  HOMELAB_QUERY_CACHE_TTL_SECONDS: ${HOMELAB_QUERY_CACHE_TTL_SECONDS:-900}
+  HOMELAB_LOG_FORMAT: ${HOMELAB_LOG_FORMAT:-text}
+  HOMELAB_METRICS_ENABLED: ${HOMELAB_METRICS_ENABLED:-true}
   HOMELAB_NETWORK_SHARE_NAME: ${HOMELAB_NETWORK_SHARE_NAME:-Local document share}
   HOMELAB_NETWORK_SHARE_DIRECTORY: /mnt/network-share
 
@@ -111,8 +122,58 @@ services:
       frontend:
         condition: service_started
 
+  # Optional web search backend: docker compose --profile web up -d
+  searxng:
+    image: searxng/searxng:2026.10.25-54ca1d9cf
+    profiles: ["web"]
+    restart: unless-stopped
+    environment:
+      SEARXNG_SECRET: ${SEARXNG_SECRET:-homelab-local-only-change-me}
+    ports:
+      - "127.0.0.1:${HOMELAB_SEARXNG_PORT:-8888}:8080"
+    volumes:
+      - ./docker/searxng/settings.yml:/etc/searxng/settings.yml:ro
+
+  # Optional metrics stack: docker compose --profile observability up -d
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    profiles: ["observability"]
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=15d
+    ports:
+      - "127.0.0.1:${HOMELAB_PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./docker/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      api:
+        condition: service_healthy
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    profiles: ["observability"]
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/homelab-ai.json
+    ports:
+      - "127.0.0.1:${HOMELAB_GRAFANA_PORT:-3001}:3000"
+    volumes:
+      - ./docker/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./docker/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+
 volumes:
   postgres_data:
   app_data:
   model_cache:
   caddy_data:
+  prometheus_data:
+  grafana_data:
