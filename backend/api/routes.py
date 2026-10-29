@@ -26,6 +26,7 @@ from backend.api.rag_service import (
     UnsupportedDocumentTypeError,
 )
 from backend.api.schemas import (
+    CorrectionResponse,
     DocumentResponse,
     EvaluationMetricsResponse,
     EvaluationRequest,
@@ -337,6 +338,11 @@ def search(
                 2,
             ),
             stages_ms=result.stages_ms,
+            correction=(
+                CorrectionResponse.model_validate(result.correction)
+                if result.correction is not None
+                else None
+            ),
         ),
     )
 

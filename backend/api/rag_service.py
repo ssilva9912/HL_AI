@@ -34,6 +34,13 @@ from backend.interfaces.retriever import RetrievalResult
 from backend.llm.ollama_generator import OllamaGenerator
 from backend.observability import RequestTrace, observe_stream, stage, use_trace
 from backend.observability.metrics import CACHE_EVENTS, RAG_CORPUS_CHUNKS, RAG_REQUESTS
+from backend.rag.corrective import (
+    Correction,
+    Corrector,
+    KnowledgeRefiner,
+    QueryRewriter,
+    RetrievalEvaluator,
+)
 from backend.rag.pipeline import RAGPipeline
 from backend.retrieval.bm25_retriever import BM25Retriever
 from backend.retrieval.cross_encoder_reranker import CrossEncoderReranker
@@ -100,11 +107,19 @@ class RAGSource:
 
 
 @dataclass(frozen=True)
+class CorrectionSummary:
+    verdict: str
+    web_used: bool
+    search_query: str | None = None
+
+
+@dataclass(frozen=True)
 class RAGAnswer:
     answer: str
     sources: list[RAGSource]
     answer_mode: str = "documents"
     stages_ms: dict[str, float] = field(default_factory=dict)
+    correction: CorrectionSummary | None = None
 
 
 @dataclass(frozen=True)
@@ -130,6 +145,7 @@ class RAGStream:
     sources: list[RAGSource]
     answer_mode: str
     trace: RequestTrace | None = None
+    correction: CorrectionSummary | None = None
 
 
 class HomelabRAGService:
@@ -400,7 +416,8 @@ class HomelabRAGService:
                 return pipeline
 
             CACHE_EVENTS.labels(cache="pipeline", result="miss").inc()
-            extra_retrievers = [self._get_web_retriever()] if web else []
+            web_retriever = self._get_web_retriever() if web else None
+            corrective = self._settings.crag_enabled
             with stage("pipeline_build"):
                 if self._bm25_retriever is None:
                     self._bm25_retriever = BM25Retriever(corpus.chunks)
@@ -412,11 +429,48 @@ class HomelabRAGService:
                     reranker=self._reranker,
                     generator=self._generator,
                     embedding_cache=self._embedding_cache,
-                    retrieval_cache=None if web else self._retrieval_cache,
-                    extra_retrievers=extra_retrievers,
+                    # Corrective pipelines search the web separately from the local
+                    # retrieval, so the cacheable local part stays cacheable.
+                    retrieval_cache=(
+                        None
+                        if web_retriever is not None and not corrective
+                        else self._retrieval_cache
+                    ),
+                    extra_retrievers=(
+                        [web_retriever] if web_retriever is not None and not corrective else []
+                    ),
+                    corrector=self._create_corrector(web_retriever) if corrective else None,
                 )
             self._pipelines[(top_k, web)] = pipeline
             return pipeline
+
+    def _create_corrector(self, web_retriever: WebRetriever | None) -> Corrector:
+        settings = self._settings
+
+        return Corrector(
+            evaluator=RetrievalEvaluator(
+                correct_threshold=settings.crag_correct_threshold,
+                incorrect_threshold=settings.crag_incorrect_threshold,
+            ),
+            refiner=KnowledgeRefiner(
+                self._reranker,
+                strip_threshold=settings.crag_strip_threshold,
+            ),
+            reranker=self._reranker,
+            web_retriever=web_retriever,
+            rewriter=QueryRewriter(self._generator) if settings.crag_query_rewrite else None,
+        )
+
+    @staticmethod
+    def _summarize_correction(correction: Correction | None) -> CorrectionSummary | None:
+        if correction is None:
+            return None
+
+        return CorrectionSummary(
+            verdict=correction.verdict.value,
+            web_used=correction.web_used,
+            search_query=correction.search_query,
+        )
 
     def warm_up(self) -> None:
         """
@@ -493,6 +547,7 @@ class HomelabRAGService:
             sources=[self._normalize_source(source) for source in result.sources],
             answer_mode=result.answer_mode,
             stages_ms=trace.stages_ms(),
+            correction=self._summarize_correction(result.correction),
         )
 
     def stream_answer(
@@ -535,6 +590,7 @@ class HomelabRAGService:
             sources=[self._normalize_source(source) for source in prepared.sources],
             answer_mode=prepared.answer_mode,
             trace=trace,
+            correction=self._summarize_correction(prepared.correction),
         )
 
     def _bounded_history(

@@ -76,6 +76,12 @@ WEB_REQUESTS = Counter(
     ("operation", "outcome"),
 )
 
+CRAG_DECISIONS = Counter(
+    "homelab_crag_decisions_total",
+    "Corrective RAG outcomes by retrieval verdict and where the answer's sources came from.",
+    ("verdict", "sources"),
+)
+
 OLLAMA_REQUESTS = Counter(
     "homelab_ollama_requests_total",
     "Requests sent to Ollama by operation and outcome.",

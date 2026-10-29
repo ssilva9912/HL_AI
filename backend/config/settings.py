@@ -99,6 +99,44 @@ class Settings(BaseSettings):
         description=("How long fetched pages for a question are reused."),
     )
 
+    crag_enabled: bool = Field(
+        default=True,
+        description=(
+            "Corrective RAG: grade the retrieved passages, keep only their relevant "
+            "sentences, and fall back to the web (when allowed for the question) if the "
+            "documents do not cover it. Off restores plain retrieval."
+        ),
+    )
+
+    crag_correct_threshold: float = Field(
+        default=2.0,
+        description=(
+            "Cross-encoder score at or above which the best passage counts as clearly "
+            "relevant, so the documents alone answer the question."
+        ),
+    )
+
+    crag_incorrect_threshold: float = Field(
+        default=-6.0,
+        description=(
+            "Cross-encoder score at or below which even the best passage counts as "
+            "irrelevant. Scores in between are ambiguous and use documents and the web."
+        ),
+    )
+
+    crag_strip_threshold: float = Field(
+        default=-4.0,
+        description=("Cross-encoder score a sentence needs to be kept when passages are refined."),
+    )
+
+    crag_query_rewrite: bool = Field(
+        default=True,
+        description=(
+            "Ask the language model for a standalone web search query before searching, "
+            "which makes follow-up questions searchable. Costs one short generation."
+        ),
+    )
+
     warmup_on_startup: bool = Field(
         default=True,
         description=("Load the corpus, reranker and Ollama models in the background at startup."),
@@ -257,6 +295,14 @@ class Settings(BaseSettings):
         if self.document_chunk_overlap >= self.document_chunk_size:
             raise ValueError(
                 "document_chunk_overlap must be smaller than document_chunk_size",
+            )
+        return self
+
+    @model_validator(mode="after")
+    def validate_crag_thresholds(self) -> Self:
+        if self.crag_incorrect_threshold >= self.crag_correct_threshold:
+            raise ValueError(
+                "crag_incorrect_threshold must be smaller than crag_correct_threshold",
             )
         return self
 

@@ -13,6 +13,7 @@ from api import (
     get_api_url,
     get_default_top_k,
 )
+from retrieval_notes import describe_correction
 
 API_URL = get_api_url()
 DEFAULT_TOP_K = get_default_top_k()
@@ -158,6 +159,10 @@ def display_answer_mode(answer_mode: str) -> None:
         st.caption(
             "General local-model answer · not grounded in uploaded documents",
         )
+    elif answer_mode == "web":
+        st.caption("Answered from web pages · check the cited sources")
+    elif answer_mode == "documents_web":
+        st.caption("Answered from your documents and web pages")
     else:
         st.caption("Document-grounded answer")
 
@@ -298,8 +303,9 @@ def render_sidebar(
             "Search the web",
             key="web_search",
             help=(
-                "Also looks up current information online. Your question is sent to the "
-                "configured search engine, and page text is treated as untrusted."
+                "Allows an online search when your documents don't cover a question. "
+                "Only then is the question sent to the configured search engine, and "
+                "page text is treated as untrusted."
             ),
         )
 
@@ -373,6 +379,8 @@ def render_chat_tab(
         st.markdown(cleaned_question)
 
     with st.chat_message("assistant"):
+        web_enabled = bool(st.session_state.get("web_search", False))
+        note_placeholder = st.empty()
         answer_placeholder = st.empty()
         answer = ""
         stream_completed = False
@@ -381,10 +389,14 @@ def render_chat_tab(
                 conversation_id=conversation_id,
                 content=cleaned_question,
                 top_k=top_k,
-                web=bool(st.session_state.get("web_search", False)),
+                web=web_enabled,
             ):
                 event_type = str(event.get("type", ""))
-                if event_type == "token":
+                if event_type == "start":
+                    note = describe_correction(event.get("correction"), web_enabled)
+                    if note:
+                        note_placeholder.caption(note)
+                elif event_type == "token":
                     answer += str(event.get("content", ""))
                     answer_placeholder.markdown(f"{answer} _")
                 elif event_type == "complete":

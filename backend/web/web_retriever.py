@@ -32,6 +32,23 @@ def display_name(url: str) -> str:
     return name[:_MAX_DISPLAY_NAME]
 
 
+def _interleave_by_page(results: list[RetrievalResult]) -> list[RetrievalResult]:
+    """
+    Orders results so each page's best chunk comes before any page's second chunk.
+
+    Without this a single long page can fill every slot, which both hides other
+    sources and lets one stale article decide the answer.
+    """
+    pages: dict[str, list[RetrievalResult]] = {}
+    for result in results:
+        pages.setdefault(str(result.chunk.source_document.source_path), []).append(result)
+
+    interleaved: list[RetrievalResult] = []
+    for depth in range(max((len(page) for page in pages.values()), default=0)):
+        interleaved.extend(page[depth] for page in pages.values() if len(page) > depth)
+    return interleaved
+
+
 class WebRetriever:
     """
     Retrieves passages from the live web for a question.
@@ -73,10 +90,10 @@ class WebRetriever:
         if not chunks:
             return []
 
-        ranked = BM25Retriever(chunks).search(query=query, top_k=top_k)
+        ranked = BM25Retriever(chunks).search(query=query, top_k=len(chunks))
         return [
             RetrievalResult(chunk=result.chunk, score=result.score, retriever="web")
-            for result in ranked
+            for result in _interleave_by_page(ranked)[:top_k]
         ]
 
     def _gather(self, query: str) -> tuple[DocumentChunk, ...]:

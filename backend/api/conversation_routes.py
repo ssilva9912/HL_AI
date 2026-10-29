@@ -18,6 +18,7 @@ from backend.api.schemas import (
     ConversationMessageResponse,
     ConversationResponse,
     ConversationUpdateRequest,
+    CorrectionResponse,
     SearchMetadata,
     SourceResponse,
 )
@@ -275,6 +276,11 @@ def add_conversation_message(
             source_count=len(result.sources),
             elapsed_ms=round(elapsed_ms, 2),
             stages_ms=result.stages_ms,
+            correction=(
+                CorrectionResponse.model_validate(result.correction)
+                if result.correction is not None
+                else None
+            ),
         ),
     )
 
@@ -339,6 +345,11 @@ def stream_conversation_message(
                     "type": "start",
                     "answer_mode": result.answer_mode,
                     "sources": source_payloads,
+                    "correction": (
+                        CorrectionResponse.model_validate(result.correction).model_dump()
+                        if result.correction is not None
+                        else None
+                    ),
                 }
             )
 

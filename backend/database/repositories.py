@@ -531,6 +531,9 @@ class ConversationRepository:
         self._session.flush()
 
 
+ANSWER_MODES = ("documents", "general", "web", "documents_web")
+
+
 class ConversationMessageRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
@@ -550,8 +553,10 @@ class ConversationMessageRepository:
         if role is MessageRole.USER and sources:
             raise ValueError("User messages cannot contain answer sources.")
         normalized_answer_mode = answer_mode.strip().lower()
-        if normalized_answer_mode not in {"documents", "general"}:
-            raise ValueError("Answer mode must be 'documents' or 'general'.")
+        if normalized_answer_mode not in ANSWER_MODES:
+            raise ValueError(
+                "Answer mode must be one of: " + ", ".join(f"'{mode}'" for mode in ANSWER_MODES)
+            )
 
         message = ConversationMessage(
             conversation_id=conversation.id,

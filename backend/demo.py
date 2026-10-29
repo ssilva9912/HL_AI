@@ -8,6 +8,7 @@ from backend.interfaces.embedder import EmbeddingProvider
 from backend.interfaces.reranker import Reranker
 from backend.interfaces.retriever import RetrievalResult, Retriever
 from backend.llm.ollama_generator import OllamaGenerator
+from backend.rag.corrective import Corrector
 from backend.rag.pipeline import RAGPipeline
 from backend.rag.prompt_builder import PromptBuilder
 from backend.retrieval.bm25_retriever import BM25Retriever
@@ -74,6 +75,7 @@ def build_rag_pipeline(
     embedding_cache: LRUCache[str, list[float]] | None = None,
     retrieval_cache: LRUCache[tuple[str, int], tuple[RetrievalResult, ...]] | None = None,
     extra_retrievers: Sequence[Retriever] = (),
+    corrector: Corrector | None = None,
 ) -> RAGPipeline:
     """
     Assemble the retrieval and generation pipeline for one corpus.
@@ -119,6 +121,7 @@ def build_rag_pipeline(
             temperature=0.1,
         ),
         top_k=top_k,
+        corrector=corrector,
     )
 
 

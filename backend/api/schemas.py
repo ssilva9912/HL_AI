@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class SearchRequest(BaseModel):
@@ -29,6 +29,21 @@ class SourceResponse(BaseModel):
     chunk_id: str | None = None
 
 
+class CorrectionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    verdict: str = Field(
+        description="How well the documents covered the question: correct, ambiguous or incorrect.",
+    )
+    web_used: bool = Field(
+        description="Whether web results were added because the documents fell short.",
+    )
+    search_query: str | None = Field(
+        default=None,
+        description="The web search query that was used, when the web was searched.",
+    )
+
+
 class SearchMetadata(BaseModel):
     top_k: int
     source_count: int
@@ -37,6 +52,7 @@ class SearchMetadata(BaseModel):
         default_factory=dict,
         description="Leaf stage timings in milliseconds; they need not sum to elapsed_ms.",
     )
+    correction: CorrectionResponse | None = None
 
 
 class SearchResponse(BaseModel):

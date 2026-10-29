@@ -140,6 +140,30 @@ def test_web_retriever_returns_ranked_web_chunks() -> None:
     assert "released in 2024" in results[0].chunk.content
 
 
+def test_one_long_page_cannot_fill_every_slot() -> None:
+    long_page = FetchedPage(
+        "https://long.example/a",
+        "Python release",
+        "python release notes " * 60,
+    )
+    short_page = FetchedPage("https://short.example/b", "Python", "python release is out")
+    hits = [
+        SearchHit("Long", long_page.url, ""),
+        SearchHit("Short", short_page.url, ""),
+    ]
+    retriever = make_retriever(
+        FakeSearch(hits),
+        FakeFetcher({long_page.url: long_page, short_page.url: short_page}),
+    )
+
+    results = retriever.search("python release", top_k=3)
+
+    names = [result.chunk.source_document.metadata.name for result in results]
+    assert len(results) == 3
+    assert names[:2] != [names[0]] * 2
+    assert {"long.example/a", "short.example/b"} <= set(names)
+
+
 def test_blocked_pages_are_skipped_and_failed_pages_fall_back_to_their_snippet() -> None:
     results = make_retriever(FakeSearch(HITS), FakeFetcher(outcomes())).search(
         "snippet survives", top_k=10
@@ -224,12 +248,17 @@ def build_calls(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     return calls
 
 
-def make_service(tmp_path: Path, web_search_url: str | None) -> HomelabRAGService:
+def make_service(
+    tmp_path: Path,
+    web_search_url: str | None,
+    crag_enabled: bool = True,
+) -> HomelabRAGService:
     return HomelabRAGService(
         settings=Settings(
             document_directory=tmp_path,
             vector_store_path=tmp_path / "index",
             web_search_url=web_search_url,
+            crag_enabled=crag_enabled,
         ),
         indexer_factory=lambda: cast(Any, None),
     )
@@ -250,11 +279,29 @@ def test_web_pipeline_requires_a_configured_search_backend(
     service._get_pipeline(cast(IndexedCorpus, FakeCorpus()), 5, web=False)
 
 
-def test_web_and_local_pipelines_are_separate_and_web_skips_the_result_cache(
+def test_corrective_pipelines_search_the_web_only_through_the_corrector(
     tmp_path: Path,
     build_calls: list[dict[str, Any]],
 ) -> None:
     service = make_service(tmp_path, "http://searxng:8080")
+    corpus = cast(IndexedCorpus, FakeCorpus())
+
+    service._get_pipeline(corpus, 5)
+    service._get_pipeline(corpus, 5, web=True)
+
+    local_call, web_call = build_calls
+    assert local_call["corrector"] is not None
+    assert local_call["corrector"]._web_retriever is None
+    assert isinstance(web_call["corrector"]._web_retriever, WebRetriever)
+    assert web_call["extra_retrievers"] == []
+    assert web_call["retrieval_cache"] is not None
+
+
+def test_web_and_local_pipelines_are_separate_and_web_skips_the_result_cache(
+    tmp_path: Path,
+    build_calls: list[dict[str, Any]],
+) -> None:
+    service = make_service(tmp_path, "http://searxng:8080", crag_enabled=False)
     corpus = cast(IndexedCorpus, FakeCorpus())
 
     local = service._get_pipeline(corpus, 5)

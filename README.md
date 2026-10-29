@@ -57,6 +57,7 @@ Designed around clean architecture, dependency injection, strict typing, and com
 | Grafana dashboard | ✅ |
 | Pipeline, embedding and retrieval caching | ✅ |
 | Opt-in live web search with SSRF protections | ✅ |
+| Corrective RAG (retrieval grading, refinement, web fallback) | ✅ |
 | MCP server (`web_search`, `fetch_page`) | ✅ |
 
 ---
@@ -269,12 +270,43 @@ docker compose --profile web up -d
 ```
 
 Then tick **Search the web** in the sidebar, or send `"web": true` to `/search` or
-the conversation message endpoints. For each web question the API searches, downloads
-the top pages (`HOMELAB_WEB_MAX_RESULTS`, default 4), and ranks their passages
-together with your documents using the same reranker. Citations show the page's
+the conversation message endpoints. This only *allows* a search: with corrective RAG
+(below) the web is used when your documents fall short. Citations show the page's
 domain and path instead of a filename. If the search backend is down, the question is
 still answered from your documents and a warning is logged; if no backend is
 configured at all, the request fails with a clear 503.
+
+## Corrective RAG
+
+Retrieval can return passages that look related but do not answer the question.
+Corrective RAG ([Yan et al., 2024](https://arxiv.org/abs/2401.15884)) checks the
+retrieved passages before answering and acts on the result. Every question is graded
+by the cross-encoder scores the reranker already produces, so grading adds no model
+call:
+
+| Verdict | Best passage score | What happens |
+| --- | --- | --- |
+| Correct | at or above `HOMELAB_CRAG_CORRECT_THRESHOLD` (2.0) | Answer from your documents. |
+| Ambiguous | in between | Use your documents and, if web search is allowed, the web, ranked together. |
+| Incorrect | at or below `HOMELAB_CRAG_INCORRECT_THRESHOLD` (-6.0) | Discard the documents and, if web search is allowed, answer from the web. |
+
+Two more steps run on the path that is taken:
+
+- **Knowledge refinement.** Each kept passage is cut to the sentences that bear on the
+  question (`HOMELAB_CRAG_STRIP_THRESHOLD`), which removes distracting text and
+  shortens the prompt.
+- **Query rewriting.** Before a web search the model writes a standalone search query
+  from the question and the conversation, so a follow-up like "when was the newest one
+  released?" is searchable. This costs one short generation
+  (`HOMELAB_CRAG_QUERY_REWRITE=false` skips it).
+
+The question only leaves your machine when the documents did not cover it *and* you
+ticked **Search the web**. The chat shows which verdict applied and the query used;
+answers are labelled as from documents, the web, or both. The thresholds are
+cross-encoder scores, so they are specific to the reranker model: re-tune them if you
+change `CrossEncoderReranker.DEFAULT_MODEL_NAME`. `HOMELAB_CRAG_ENABLED=false`
+restores plain retrieval, where a ticked web box always searches. Decisions are
+counted in `homelab_crag_decisions_total{verdict,sources}`.
 
 Safeguards:
 
