@@ -111,6 +111,7 @@ class CorrectionSummary:
     verdict: str
     web_used: bool
     search_query: str | None = None
+    local_score: float | None = None
 
 
 @dataclass(frozen=True)
@@ -470,6 +471,7 @@ class HomelabRAGService:
             verdict=correction.verdict.value,
             web_used=correction.web_used,
             search_query=correction.search_query,
+            local_score=correction.local_score,
         )
 
     def warm_up(self) -> None:

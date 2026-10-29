@@ -37,6 +37,7 @@ class Correction:
     verdict: Verdict
     web_used: bool = False
     search_query: str | None = None
+    local_score: float | None = None
 
 
 def is_web_result(result: RetrievalResult) -> bool:
@@ -224,22 +225,27 @@ class Corrector:
     ) -> Correction:
         with stage("crag.evaluate"):
             verdict = self._evaluator.evaluate(local_results)
+        local_score = max((result.score for result in local_results), default=None)
 
         local = (
             [] if verdict is Verdict.INCORRECT else self._refiner.refine(question, local_results)
         )
 
         if verdict is Verdict.CORRECT or self._web_retriever is None:
-            return self._finish(verdict, local or local_results)
+            return self._finish(verdict, local or local_results, local_score=local_score)
 
         search_query = self._rewriter.rewrite(question, history) if self._rewriter else question
         web = self._search_web(self._web_retriever, search_query, top_k)
 
         if not web:
-            return self._finish(verdict, local or local_results, search_query=search_query)
+            return self._finish(
+                verdict, local or local_results, search_query=search_query, local_score=local_score
+            )
 
         merged = sorted([*local, *web], key=lambda result: -result.score)[:top_k]
-        return self._finish(verdict, merged, web_used=True, search_query=search_query)
+        return self._finish(
+            verdict, merged, web_used=True, search_query=search_query, local_score=local_score
+        )
 
     def _search_web(
         self,
@@ -264,6 +270,7 @@ class Corrector:
         *,
         web_used: bool = False,
         search_query: str | None = None,
+        local_score: float | None = None,
     ) -> Correction:
         has_documents = any(not is_web_result(result) for result in results)
         if web_used and has_documents:
@@ -281,4 +288,5 @@ class Corrector:
             verdict=verdict,
             web_used=web_used,
             search_query=search_query,
+            local_score=local_score,
         )

@@ -1,0 +1,192 @@
+[
+  {
+    "question": "Why does Homelab AI use Reciprocal Rank Fusion?",
+    "expected_verdict": "correct",
+    "answer_keywords": ["rank|position", "score"],
+    "category": "documented"
+  },
+  {
+    "question": "What is BM25 useful for?",
+    "expected_verdict": "correct",
+    "answer_keywords": ["exact|term|identifier|filename"],
+    "category": "documented"
+  },
+  {
+    "question": "How does dense retrieval work?",
+    "expected_verdict": "correct",
+    "answer_keywords": ["embedding|vector"],
+    "category": "documented"
+  },
+  {
+    "question": "What does the cross-encoder reranker do?",
+    "expected_verdict": "correct",
+    "answer_keywords": ["reorder|relevance|rank"],
+    "category": "documented"
+  },
+  {
+    "question": "Which components is the Homelab AI system split into?",
+    "expected_verdict": "correct",
+    "answer_keywords": ["pars|chunk|embed|rerank"],
+    "category": "documented"
+  },
+  {
+    "question": "Why shouldn't the BM25 and dense retrieval scores just be averaged?",
+    "expected_verdict": "correct",
+    "answer_keywords": ["rank|incompatible|different"],
+    "category": "documented"
+  },
+  {
+    "question": "When is dense retrieval better than keyword matching?",
+    "expected_verdict": "correct",
+    "answer_keywords": ["semantic|wording|meaning|related"],
+    "category": "documented"
+  },
+  {
+    "question": "What kinds of text does BM25 find well?",
+    "expected_verdict": "correct",
+    "answer_keywords": ["identifier|filename|error|function|exact"],
+    "category": "documented"
+  },
+  {
+    "question": "What happens after rank fusion?",
+    "expected_verdict": "correct",
+    "answer_keywords": ["rerank|cross-encoder"],
+    "category": "documented"
+  },
+  {
+    "question": "Which retrieval methods does Homelab AI combine?",
+    "expected_verdict": "correct",
+    "answer_keywords": ["bm25", "dense"],
+    "category": "documented"
+  },
+  {
+    "question": "What is Homelab AI?",
+    "expected_verdict": "correct",
+    "answer_keywords": ["local|retrieval"],
+    "category": "documented"
+  },
+  {
+    "question": "How does the reranker judge each passage?",
+    "expected_verdict": "correct",
+    "answer_keywords": ["question", "passage"],
+    "category": "documented"
+  },
+  {
+    "question": "How does RRF combine the results of the two retrievers?",
+    "expected_verdict": "correct",
+    "answer_keywords": ["rank|position"],
+    "category": "documented"
+  },
+  {
+    "question": "What is the capital of Australia?",
+    "expected_verdict": "incorrect",
+    "web_answer_keywords": ["canberra"],
+    "category": "unrelated"
+  },
+  {
+    "question": "Who wrote Pride and Prejudice?",
+    "expected_verdict": "incorrect",
+    "web_answer_keywords": ["austen"],
+    "category": "unrelated"
+  },
+  {
+    "question": "How do I bake sourdough bread?",
+    "expected_verdict": "incorrect",
+    "web_answer_keywords": ["starter|dough"],
+    "category": "unrelated"
+  },
+  {
+    "question": "What is the speed of light in a vacuum?",
+    "expected_verdict": "incorrect",
+    "web_answer_keywords": ["299|300"],
+    "category": "unrelated"
+  },
+  {
+    "question": "What does a mitochondrion do in a cell?",
+    "expected_verdict": "incorrect",
+    "web_answer_keywords": ["energy|atp"],
+    "category": "unrelated"
+  },
+  {
+    "question": "How do I change a flat tire?",
+    "expected_verdict": "incorrect",
+    "web_answer_keywords": ["jack|lug|wheel"],
+    "category": "unrelated"
+  },
+  {
+    "question": "Which team won the 2018 FIFA World Cup?",
+    "expected_verdict": "incorrect",
+    "web_answer_keywords": ["france"],
+    "category": "unrelated"
+  },
+  {
+    "question": "What is the boiling point of water at sea level in Celsius?",
+    "expected_verdict": "incorrect",
+    "web_answer_keywords": ["100"],
+    "category": "unrelated"
+  },
+  {
+    "question": "How do you say hello in French?",
+    "expected_verdict": "incorrect",
+    "web_answer_keywords": ["bonjour"],
+    "category": "unrelated"
+  },
+  {
+    "question": "What is the latest stable version of Python?",
+    "expected_verdict": "incorrect",
+    "web_answer_keywords": ["3."],
+    "category": "fresh"
+  },
+  {
+    "question": "What is the largest planet in the solar system?",
+    "expected_verdict": "incorrect",
+    "web_answer_keywords": ["jupiter"],
+    "category": "unrelated"
+  },
+  {
+    "question": "How many players are on the field for one team in soccer?",
+    "expected_verdict": "incorrect",
+    "web_answer_keywords": ["11|eleven"],
+    "category": "unrelated"
+  },
+  {
+    "question": "How does the system handle documents?",
+    "expected_verdict": "ambiguous",
+    "category": "vague"
+  },
+  {
+    "question": "Which vector database does Homelab AI store embeddings in?",
+    "expected_verdict": "ambiguous",
+    "category": "related-but-undocumented"
+  },
+  {
+    "question": "Which embedding model does Homelab AI use?",
+    "expected_verdict": "ambiguous",
+    "category": "related-but-undocumented"
+  },
+  {
+    "question": "What are the weaknesses of BM25 compared with dense retrieval?",
+    "expected_verdict": "ambiguous",
+    "category": "related-but-undocumented"
+  },
+  {
+    "question": "How is the cross-encoder reranker trained?",
+    "expected_verdict": "ambiguous",
+    "category": "related-but-undocumented"
+  },
+  {
+    "question": "How do I install Homelab AI?",
+    "expected_verdict": "ambiguous",
+    "category": "related-but-undocumented"
+  },
+  {
+    "question": "What does semantic chunking mean?",
+    "expected_verdict": "ambiguous",
+    "category": "related-but-undocumented"
+  },
+  {
+    "question": "How fast is retrieval in Homelab AI?",
+    "expected_verdict": "ambiguous",
+    "category": "related-but-undocumented"
+  }
+]

@@ -42,6 +42,10 @@ class CorrectionResponse(BaseModel):
         default=None,
         description="The web search query that was used, when the web was searched.",
     )
+    local_score: float | None = Field(
+        default=None,
+        description="Best cross-encoder score among the retrieved documents, before grading.",
+    )
 
 
 class SearchMetadata(BaseModel):

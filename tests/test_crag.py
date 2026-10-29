@@ -477,6 +477,7 @@ class CorrectedService:
                 verdict="incorrect",
                 web_used=True,
                 search_query="python latest version",
+                local_score=-9.5,
             ),
         )
 
@@ -492,6 +493,7 @@ def test_search_reports_the_corrective_decision() -> None:
         "verdict": "incorrect",
         "web_used": True,
         "search_query": "python latest version",
+        "local_score": -9.5,
     }
 
 
@@ -607,7 +609,12 @@ def test_stream_start_event_carries_the_decision() -> None:
     start = events[0]
     assert start["type"] == "start"
     assert start["answer_mode"] == "web"
-    assert start["correction"] == {"verdict": "incorrect", "web_used": True, "search_query": "q"}
+    assert start["correction"] == {
+        "verdict": "incorrect",
+        "web_used": True,
+        "search_query": "q",
+        "local_score": None,
+    }
 
     saved = client.get(f"/conversations/{conversation_id}").json()["messages"][-1]
     assert saved["answer_mode"] == "web"

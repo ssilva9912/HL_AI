@@ -122,6 +122,20 @@ LLM_TOKENS_PER_SECOND = Histogram(
     "Generation throughput reported by Ollama.",
     buckets=_TOKENS_PER_SECOND_BUCKETS,
 )
+LLM_LAST_TOKENS_PER_SECOND = Gauge(
+    "homelab_llm_last_tokens_per_second",
+    "Generation throughput of the most recent response.",
+)
+LLM_TOKENS = Counter(
+    "homelab_llm_tokens_total",
+    "Tokens processed by the language model, by kind (prompt or completion).",
+    ("kind",),
+)
+LLM_PROCESSING_SECONDS = Counter(
+    "homelab_llm_processing_seconds_total",
+    "Time the language model spent on each phase (prompt_eval or generation).",
+    ("phase",),
+)
 
 
 def _positive_number(payload: Mapping[str, Any], key: str) -> float | None:
@@ -153,21 +167,26 @@ def observe_generation(payload: Mapping[str, Any]) -> dict[str, float]:
     if prompt_tokens is not None:
         summary["prompt_tokens"] = prompt_tokens
         LLM_PROMPT_TOKENS.observe(prompt_tokens)
+        LLM_TOKENS.labels(kind="prompt").inc(prompt_tokens)
 
     prompt_ns = _positive_number(payload, "prompt_eval_duration")
     if prompt_ns is not None:
         summary["prompt_eval_ms"] = round(prompt_ns / _NANOSECONDS * 1_000, 1)
         LLM_PROMPT_EVAL.observe(prompt_ns / _NANOSECONDS)
+        LLM_PROCESSING_SECONDS.labels(phase="prompt_eval").inc(prompt_ns / _NANOSECONDS)
 
     completion_tokens = _positive_number(payload, "eval_count")
     if completion_tokens is not None:
         summary["completion_tokens"] = completion_tokens
         LLM_COMPLETION_TOKENS.observe(completion_tokens)
+        LLM_TOKENS.labels(kind="completion").inc(completion_tokens)
 
     eval_ns = _positive_number(payload, "eval_duration")
     if completion_tokens is not None and eval_ns is not None:
         tokens_per_second = completion_tokens / (eval_ns / _NANOSECONDS)
         summary["tokens_per_second"] = round(tokens_per_second, 1)
         LLM_TOKENS_PER_SECOND.observe(tokens_per_second)
+        LLM_LAST_TOKENS_PER_SECOND.set(tokens_per_second)
+        LLM_PROCESSING_SECONDS.labels(phase="generation").inc(eval_ns / _NANOSECONDS)
 
     return summary

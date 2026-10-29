@@ -122,6 +122,28 @@ def test_observe_generation_derives_tokens_per_second() -> None:
     }
 
 
+def test_observe_generation_accumulates_token_and_time_counters() -> None:
+    tokens = {"kind": "completion"}
+    seconds = {"phase": "generation"}
+    tokens_before = sample("homelab_llm_tokens_total", tokens)
+    seconds_before = sample("homelab_llm_processing_seconds_total", seconds)
+    prompt_before = sample("homelab_llm_tokens_total", {"kind": "prompt"})
+
+    observe_generation(
+        {
+            "prompt_eval_count": 300,
+            "prompt_eval_duration": 100_000_000,
+            "eval_count": 80,
+            "eval_duration": 2_000_000_000,
+        }
+    )
+
+    assert sample("homelab_llm_tokens_total", tokens) == tokens_before + 80
+    assert sample("homelab_llm_tokens_total", {"kind": "prompt"}) == prompt_before + 300
+    assert sample("homelab_llm_processing_seconds_total", seconds) == seconds_before + 2.0
+    assert sample("homelab_llm_last_tokens_per_second") == 40.0
+
+
 def test_observe_generation_counts_truncated_answers() -> None:
     before = sample("homelab_llm_truncated_total")
 
