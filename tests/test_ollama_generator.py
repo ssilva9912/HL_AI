@@ -47,6 +47,7 @@ def test_generate_returns_model_response() -> None:
         base_url="http://localhost:11434/",
         timeout_seconds=30.0,
         temperature=0.2,
+        keep_alive="10m",
         post_function=fake_post,
     )
 
@@ -59,10 +60,42 @@ def test_generate_returns_model_response() -> None:
         "model": "test-model",
         "prompt": "Explain Homelab AI.",
         "stream": False,
+        "keep_alive": "10m",
         "options": {
             "temperature": 0.2,
         },
     }
+
+
+def test_generate_limits_generated_tokens_when_configured() -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_post(
+        url: str,
+        *,
+        json: dict[str, Any],
+        timeout: float,
+    ) -> httpx.Response:
+        del url
+        del timeout
+        captured.update(json)
+        return make_response({"response": "ok"})
+
+    OllamaGenerator(
+        model="test-model",
+        base_url="http://localhost:11434",
+        timeout_seconds=30.0,
+        keep_alive="10m",
+        num_predict=256,
+        post_function=fake_post,
+    ).generate("Hello")
+
+    assert captured["options"] == {"temperature": 0.1, "num_predict": 256}
+
+
+def test_generator_rejects_non_positive_token_limit() -> None:
+    with pytest.raises(ValueError, match="num_predict"):
+        OllamaGenerator(model="test-model", base_url="http://localhost:11434", num_predict=0)
 
 
 def test_generate_strips_prompt_and_response() -> None:

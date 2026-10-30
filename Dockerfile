@@ -20,6 +20,7 @@ COPY alembic.ini ./
 COPY backend ./backend
 COPY evaluation ./evaluation
 COPY frontend ./frontend
+COPY .streamlit ./.streamlit
 COPY docker ./docker
 
 RUN groupadd --gid 10001 homelab \

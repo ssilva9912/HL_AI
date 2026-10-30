@@ -25,6 +25,7 @@ class ConversationRAGService:
         history: list[tuple[str, str]] | None = None,
         *,
         hybrid: bool = False,
+        web: bool = False,
     ) -> RAGAnswer:
         self.histories.append(history or [])
         if self.should_fail:
@@ -49,6 +50,7 @@ class ConversationRAGService:
         history: list[tuple[str, str]] | None = None,
         *,
         hybrid: bool = False,
+        web: bool = False,
     ) -> RAGStream:
         del hybrid
         self.histories.append(history or [])

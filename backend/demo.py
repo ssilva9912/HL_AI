@@ -1,8 +1,14 @@
+from collections.abc import Sequence
 from pathlib import Path
 
+from backend.cache import CachedQueryEmbedder, CachingRetriever, LRUCache
 from backend.indexing.indexer import Indexer
 from backend.indexing.models import IndexedCorpus
+from backend.interfaces.embedder import EmbeddingProvider
+from backend.interfaces.reranker import Reranker
+from backend.interfaces.retriever import RetrievalResult, Retriever
 from backend.llm.ollama_generator import OllamaGenerator
+from backend.rag.corrective import Corrector
 from backend.rag.pipeline import RAGPipeline
 from backend.rag.prompt_builder import PromptBuilder
 from backend.retrieval.bm25_retriever import BM25Retriever
@@ -62,37 +68,60 @@ def build_rag_pipeline(
     corpus: IndexedCorpus,
     top_k: int = 3,
     model: str | None = None,
+    *,
+    bm25_retriever: BM25Retriever | None = None,
+    reranker: Reranker | None = None,
+    generator: OllamaGenerator | None = None,
+    embedding_cache: LRUCache[str, list[float]] | None = None,
+    retrieval_cache: LRUCache[tuple[str, int], tuple[RetrievalResult, ...]] | None = None,
+    extra_retrievers: Sequence[Retriever] = (),
+    corrector: Corrector | None = None,
 ) -> RAGPipeline:
-    bm25_retriever = BM25Retriever(corpus.chunks)
+    """
+    Assemble the retrieval and generation pipeline for one corpus.
+
+    The optional arguments let a long-lived caller share expensive pieces (the
+    BM25 index, the cross-encoder model, the Ollama client) and caches across
+    requests. Omitting them builds everything fresh, as the CLI demo does.
+    """
+
+    embedder: EmbeddingProvider = corpus.embedder
+    if embedding_cache is not None:
+        embedder = CachedQueryEmbedder(embedder, embedding_cache)
 
     dense_retriever = DenseRetriever(
-        embedder=corpus.embedder,
+        embedder=embedder,
         vector_store=corpus.vector_store,
     )
 
     hybrid_retriever = HybridRetriever(
         retrievers=[
-            bm25_retriever,
+            bm25_retriever or BM25Retriever(corpus.chunks),
             dense_retriever,
+            *extra_retrievers,
         ],
         rrf_k=60,
         candidate_multiplier=2,
     )
 
-    reranking_retriever = RerankingRetriever(
+    retriever: Retriever = RerankingRetriever(
         retriever=hybrid_retriever,
-        reranker=CrossEncoderReranker(),
+        reranker=reranker or CrossEncoderReranker(),
         candidate_multiplier=4,
     )
+    if retrieval_cache is not None:
+        retriever = CachingRetriever(retriever, retrieval_cache)
 
     return RAGPipeline(
-        retriever=reranking_retriever,
+        retriever=retriever,
         prompt_builder=PromptBuilder(),
-        generator=OllamaGenerator(
+        generator=generator
+        or OllamaGenerator(
             model=model,
             temperature=0.1,
         ),
         top_k=top_k,
+        corrector=corrector,
     )
 
 

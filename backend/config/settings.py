@@ -1,6 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
-from typing import Self
+from typing import Literal, Self
 
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -39,6 +39,133 @@ class Settings(BaseSettings):
     llm_model: str = Field(default="llama3.1:8b")
     embedding_model: str = Field(
         default="nomic-embed-text",
+    )
+
+    ollama_keep_alive: str = Field(
+        default="30m",
+        min_length=1,
+        description=(
+            "How long Ollama keeps a model loaded after its last request, for example "
+            "'30m'. Avoids a multi-second reload after idle periods."
+        ),
+    )
+
+    ollama_num_predict: int = Field(
+        default=1_024,
+        ge=1,
+        le=8_192,
+        description=(
+            "Maximum tokens the model may generate per answer. Bounds the worst case: "
+            "without it a model that fails to stop can run until its context is full."
+        ),
+    )
+
+    web_search_url: str | None = Field(
+        default=None,
+        description=(
+            "Base URL of a SearXNG instance with JSON output enabled. Web search is "
+            "unavailable while this is unset."
+        ),
+    )
+
+    web_max_results: int = Field(
+        default=4,
+        ge=1,
+        le=10,
+        description=("Search results whose pages are fetched for each web-enabled question."),
+    )
+
+    web_fetch_timeout: float = Field(
+        default=8.0,
+        gt=0,
+        description=("Seconds allowed for each web page download."),
+    )
+
+    web_max_page_bytes: int = Field(
+        default=1_000_000,
+        gt=0,
+        description=("Largest web page body that is read; the rest is discarded."),
+    )
+
+    web_max_page_chars: int = Field(
+        default=12_000,
+        gt=0,
+        description=("Characters of extracted text kept from each web page."),
+    )
+
+    web_cache_ttl_seconds: float = Field(
+        default=900.0,
+        gt=0,
+        description=("How long fetched pages for a question are reused."),
+    )
+
+    crag_enabled: bool = Field(
+        default=True,
+        description=(
+            "Corrective RAG: grade the retrieved passages, keep only their relevant "
+            "sentences, and fall back to the web (when allowed for the question) if the "
+            "documents do not cover it. Off restores plain retrieval."
+        ),
+    )
+
+    crag_correct_threshold: float = Field(
+        default=2.0,
+        description=(
+            "Cross-encoder score at or above which the best passage counts as clearly "
+            "relevant, so the documents alone answer the question."
+        ),
+    )
+
+    crag_incorrect_threshold: float = Field(
+        default=-6.0,
+        description=(
+            "Cross-encoder score at or below which even the best passage counts as "
+            "irrelevant. Scores in between are ambiguous and use documents and the web."
+        ),
+    )
+
+    crag_strip_threshold: float = Field(
+        default=-4.0,
+        description=("Cross-encoder score a sentence needs to be kept when passages are refined."),
+    )
+
+    crag_query_rewrite: bool = Field(
+        default=True,
+        description=(
+            "Ask the language model for a standalone web search query before searching, "
+            "which makes follow-up questions searchable. Costs one short generation."
+        ),
+    )
+
+    warmup_on_startup: bool = Field(
+        default=True,
+        description=("Load the corpus, reranker and Ollama models in the background at startup."),
+    )
+
+    query_cache_size: int = Field(
+        default=256,
+        ge=0,
+        le=100_000,
+        description=(
+            "Entries kept in each of the query-embedding and retrieval-result caches. "
+            "0 disables both."
+        ),
+    )
+
+    query_cache_ttl_seconds: float = Field(
+        default=900.0,
+        gt=0,
+        description=("How long a cached retrieval result stays valid."),
+    )
+
+    log_format: Literal["text", "json"] = Field(
+        default="text",
+        description=("'json' emits one structured JSON object per log line."),
+    )
+
+    metrics_enabled: bool = Field(
+        default=True,
+        description=("Expose Prometheus metrics at /metrics."),
     )
 
     request_timeout: float = Field(
@@ -168,6 +295,14 @@ class Settings(BaseSettings):
         if self.document_chunk_overlap >= self.document_chunk_size:
             raise ValueError(
                 "document_chunk_overlap must be smaller than document_chunk_size",
+            )
+        return self
+
+    @model_validator(mode="after")
+    def validate_crag_thresholds(self) -> Self:
+        if self.crag_incorrect_threshold >= self.crag_correct_threshold:
+            raise ValueError(
+                "crag_incorrect_threshold must be smaller than crag_correct_threshold",
             )
         return self
 

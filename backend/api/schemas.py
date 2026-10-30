@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class SearchRequest(BaseModel):
@@ -16,6 +16,10 @@ class SearchRequest(BaseModel):
         le=20,
         description="Maximum number of retrieved sources.",
     )
+    web: bool = Field(
+        default=False,
+        description="Also search the live web. Sends the question to the configured search engine.",
+    )
 
 
 class SourceResponse(BaseModel):
@@ -23,12 +27,41 @@ class SourceResponse(BaseModel):
     score: float
     document: str | None = None
     chunk_id: str | None = None
+    citation: int | None = Field(
+        default=None,
+        description="The [n] this source is cited as; passages from one document share a number.",
+    )
+    url: str | None = Field(default=None, description="Web page address, for web sources.")
+
+
+class CorrectionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    verdict: str = Field(
+        description="How well the documents covered the question: correct, ambiguous or incorrect.",
+    )
+    web_used: bool = Field(
+        description="Whether web results were added because the documents fell short.",
+    )
+    search_query: str | None = Field(
+        default=None,
+        description="The web search query that was used, when the web was searched.",
+    )
+    local_score: float | None = Field(
+        default=None,
+        description="Best cross-encoder score among the retrieved documents, before grading.",
+    )
 
 
 class SearchMetadata(BaseModel):
     top_k: int
     source_count: int
     elapsed_ms: float
+    stages_ms: dict[str, float] = Field(
+        default_factory=dict,
+        description="Leaf stage timings in milliseconds; they need not sum to elapsed_ms.",
+    )
+    correction: CorrectionResponse | None = None
 
 
 class SearchResponse(BaseModel):
@@ -139,6 +172,10 @@ class ConversationMessageRequest(BaseModel):
         default=5,
         ge=1,
         le=20,
+    )
+    web: bool = Field(
+        default=False,
+        description="Also search the live web. Sends the question to the configured search engine.",
     )
 
 

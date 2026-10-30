@@ -4,14 +4,36 @@ from typing import Any
 import streamlit as st
 from api import (
     Conversation,
-    EvaluationResult,
     HomelabAPIClient,
     HomelabAPIError,
     IngestionJob,
     QueuedUpload,
     SearchResult,
+    Source,
     get_api_url,
     get_default_top_k,
+)
+from citations import format_citation, group_citations, link_citations
+from forms_panel import build_rows, collect_values, summarize
+from metrics_panel import (
+    DASHBOARDS,
+    START_COMMAND,
+    dashboard_url,
+    get_grafana_health_url,
+    get_grafana_url,
+    grafana_is_up,
+)
+from retrieval_notes import describe_correction, looks_like_abstention
+from theme import (
+    ASSISTANT_AVATAR,
+    QUICK_ACTIONS,
+    USER_AVATAR,
+    header_html,
+    inject_styles,
+    section_label,
+    sidebar_brand_html,
+    status_pill,
+    welcome_html,
 )
 
 API_URL = get_api_url()
@@ -24,9 +46,6 @@ def initialize_session_state() -> None:
 
     if "backend_status" not in st.session_state:
         st.session_state.backend_status = None
-
-    if "evaluation_result" not in st.session_state:
-        st.session_state.evaluation_result = None
 
     if "ingestion_results" not in st.session_state:
         st.session_state.ingestion_results = []
@@ -49,6 +68,17 @@ def check_backend(
         return
 
     st.session_state.backend_status = health
+
+
+def serialize_source(source: Source) -> dict[str, Any]:
+    return {
+        "text": source.text,
+        "score": source.score,
+        "document": source.document,
+        "chunk_id": source.chunk_id,
+        "citation": source.citation,
+        "url": source.url,
+    }
 
 
 def add_message(
@@ -78,15 +108,7 @@ def load_conversation(
                 "answer_mode",
                 "documents",
             ),
-            "sources": [
-                {
-                    "text": source.text,
-                    "score": source.score,
-                    "document": source.document,
-                    "chunk_id": source.chunk_id,
-                }
-                for source in message.sources
-            ],
+            "sources": [serialize_source(source) for source in message.sources],
         }
         for message in conversation.messages
     ]
@@ -95,69 +117,43 @@ def load_conversation(
 def serialize_sources(
     result: SearchResult,
 ) -> list[dict[str, Any]]:
-    return [
-        {
-            "text": source.text,
-            "score": source.score,
-            "document": source.document,
-            "chunk_id": source.chunk_id,
-        }
-        for source in result.sources
-    ]
+    return [serialize_source(source) for source in result.sources]
 
 
 def display_sources(
     sources: list[dict[str, Any]],
 ) -> None:
-    if not sources:
+    citations = group_citations(sources)
+    if not citations:
         return
 
-    with st.expander(
-        f"Sources ({len(sources)})",
-        expanded=False,
-    ):
-        for index, source in enumerate(
-            sources,
-            start=1,
-        ):
-            document = source.get(
-                "document",
-                "Unknown document",
-            )
-            chunk_id = source.get(
-                "chunk_id",
-                "",
-            )
-            score = float(
-                source.get(
-                    "score",
-                    0.0,
-                )
-            )
-            text = source.get(
-                "text",
-                "",
-            )
+    st.markdown("**Sources**")
+    st.markdown("\n".join(f"- {format_citation(citation)}" for citation in citations))
 
-            st.markdown(f"**{index}. {document}**")
-
-            metadata_parts = [f"Score: `{score:.4f}`"]
-
-            if chunk_id:
-                metadata_parts.append(f"Chunk: `{chunk_id}`")
-
-            st.caption(" · ".join(metadata_parts))
-            st.write(text)
-
-            if index < len(sources):
+    with st.expander("Show passages", expanded=False):
+        for citation in citations:
+            st.markdown(f"**[{citation.number}] {citation.label}**")
+            for passage in citation.passages:
+                metadata_parts = [f"Score: `{float(passage.get('score', 0.0)):.4f}`"]
+                if passage.get("chunk_id"):
+                    metadata_parts.append(f"Chunk: `{passage['chunk_id']}`")
+                st.caption(" · ".join(metadata_parts))
+                st.write(passage.get("text", ""))
+            if citation is not citations[-1]:
                 st.divider()
 
 
-def display_answer_mode(answer_mode: str) -> None:
-    if answer_mode == "general":
+def display_answer_mode(answer_mode: str, answer: str = "") -> None:
+    if answer_mode in {"documents", "web", "documents_web"} and looks_like_abstention(answer):
+        st.caption("The sources found didn't answer this · try rephrasing or check the links below")
+    elif answer_mode == "general":
         st.caption(
             "General local-model answer · not grounded in uploaded documents",
         )
+    elif answer_mode == "web":
+        st.caption("Answered from web pages · check the cited sources")
+    elif answer_mode == "documents_web":
+        st.caption("Answered from your documents and web pages")
     else:
         st.caption("Document-grounded answer")
 
@@ -181,11 +177,11 @@ def display_chat_history() -> None:
             "documents",
         )
 
-        with st.chat_message(role):
-            st.markdown(content)
+        with st.chat_message(role, avatar=USER_AVATAR if role == "user" else ASSISTANT_AVATAR):
+            st.markdown(link_citations(content, group_citations(sources)))
 
             if role == "assistant":
-                display_answer_mode(answer_mode)
+                display_answer_mode(answer_mode, content)
                 display_sources(sources)
 
 
@@ -193,14 +189,11 @@ def render_sidebar(
     client: HomelabAPIClient,
 ) -> int:
     with st.sidebar:
-        st.header("Homelab AI")
-        st.caption("Local retrieval-augmented generation")
+        st.markdown(sidebar_brand_html(), unsafe_allow_html=True)
 
-        st.divider()
-
-        st.subheader("Conversations")
         if st.button(
             "New conversation",
+            icon=":material/add:",
             use_container_width=True,
             type="primary",
         ):
@@ -219,6 +212,7 @@ def render_sidebar(
             st.warning(f"Could not load conversations: {exc}")
 
         if conversations:
+            st.markdown(section_label("Conversations"), unsafe_allow_html=True)
             conversation_by_id = {conversation.id: conversation for conversation in conversations}
             active_id = st.session_state.active_conversation_id
             if active_id not in conversation_by_id:
@@ -246,7 +240,7 @@ def render_sidebar(
                     st.rerun()
 
             active = conversation_by_id[selected_id]
-            with st.expander("Conversation settings"):
+            with st.expander("Rename or delete"):
                 title = st.text_input(
                     "Title",
                     value=active.title,
@@ -281,44 +275,47 @@ def render_sidebar(
                         st.session_state.messages = []
                         st.rerun()
         else:
-            st.caption("Create a conversation to begin chatting.")
+            st.caption("Start a conversation to begin chatting.")
 
-        st.divider()
+        st.markdown(section_label("Answer settings"), unsafe_allow_html=True)
 
         top_k = st.slider(
-            label="Retrieved sources",
+            label="Sources per answer",
             min_value=1,
             max_value=20,
             value=DEFAULT_TOP_K,
             step=1,
-            help=("Controls how many reranked passages are returned with each answer."),
+            help=("How many of the best-matching passages are used for each answer."),
         )
 
-        st.divider()
+        st.toggle(
+            "Search the web when needed",
+            key="web_search",
+            help=(
+                "Allows an online search when your documents don't cover a question. "
+                "Only then is the question sent to the configured search engine, and "
+                "page text is treated as untrusted."
+            ),
+        )
+
+        st.markdown(section_label("Connection"), unsafe_allow_html=True)
 
         status = st.session_state.backend_status
+        st.markdown(status_pill(status is not None), unsafe_allow_html=True)
 
-        if status is None:
-            st.error("Backend offline")
-            st.caption(f"Start FastAPI on {API_URL}.")
-        else:
-            service = status.get(
-                "service",
-                "homelab-ai",
-            )
-
-            st.success("Backend online")
-            st.caption(f"Service: `{service}`")
-
-        if st.button(
-            "Check backend",
-            use_container_width=True,
-        ):
-            check_backend(client)
-            st.rerun()
-
-        st.divider()
-        st.caption(f"API: `{API_URL}`")
+        with st.expander("Details"):
+            if status is None:
+                st.caption(f"Can't reach the backend. Start it on `{API_URL}`.")
+            else:
+                st.caption(f"Service: `{status.get('service', 'homelab-ai')}`")
+            st.caption(f"API: `{API_URL}`")
+            if st.button(
+                "Check again",
+                icon=":material/refresh:",
+                use_container_width=True,
+            ):
+                check_backend(client)
+                st.rerun()
 
     return int(top_k)
 
@@ -326,15 +323,25 @@ def render_sidebar(
 def render_chat_tab(
     client: HomelabAPIClient,
     top_k: int,
+    pages: dict[str, Any],
 ) -> None:
-    st.subheader("Document chat")
-    st.caption(
-        "Ask questions about your documents. Conversations and citations are saved.",
-    )
+    welcome = st.empty()
+    if not st.session_state.messages:
+        with welcome.container():
+            st.markdown(welcome_html(), unsafe_allow_html=True)
+            columns = st.columns(len(QUICK_ACTIONS))
+            for column, (label, icon, target) in zip(columns, QUICK_ACTIONS, strict=True):
+                if column.button(
+                    label,
+                    key=f"quick_action_{target}",
+                    icon=icon,
+                    use_container_width=True,
+                ):
+                    st.switch_page(pages[target])
 
     display_chat_history()
 
-    question = st.chat_input("Ask a question about your documents...")
+    question = st.chat_input("Ask anything about your documents...")
 
     if question is None:
         return
@@ -344,6 +351,8 @@ def render_chat_tab(
     if not cleaned_question:
         st.warning("Enter a question before submitting.")
         return
+
+    welcome.empty()
 
     conversation_id = st.session_state.active_conversation_id
     if conversation_id is None:
@@ -360,23 +369,32 @@ def render_chat_tab(
         content=cleaned_question,
     )
 
-    with st.chat_message("user"):
+    with st.chat_message("user", avatar=USER_AVATAR):
         st.markdown(cleaned_question)
 
-    with st.chat_message("assistant"):
+    with st.chat_message("assistant", avatar=ASSISTANT_AVATAR):
+        web_enabled = bool(st.session_state.get("web_search", False))
+        note_placeholder = st.empty()
         answer_placeholder = st.empty()
         answer = ""
+        citations: list[Any] = []
         stream_completed = False
         try:
             for event in client.stream_conversation_message(
                 conversation_id=conversation_id,
                 content=cleaned_question,
                 top_k=top_k,
+                web=web_enabled,
             ):
                 event_type = str(event.get("type", ""))
-                if event_type == "token":
+                if event_type == "start":
+                    citations = group_citations(list(event.get("sources") or []))
+                    note = describe_correction(event.get("correction"), web_enabled)
+                    if note:
+                        note_placeholder.caption(note)
+                elif event_type == "token":
                     answer += str(event.get("content", ""))
-                    answer_placeholder.markdown(f"{answer} _")
+                    answer_placeholder.markdown(f"{link_citations(answer, citations)} _")
                 elif event_type == "complete":
                     stream_completed = True
         except (ValueError, HomelabAPIError) as exc:
@@ -394,7 +412,7 @@ def render_chat_tab(
             st.error("The response stream ended before completion. You can retry.")
             return
 
-        answer_placeholder.markdown(answer)
+        answer_placeholder.markdown(link_citations(answer, citations))
         try:
             conversation = client.get_conversation(conversation_id)
         except HomelabAPIError as exc:
@@ -407,17 +425,8 @@ def render_chat_tab(
         ]
         if assistant_messages:
             assistant = assistant_messages[-1]
-            display_answer_mode(assistant.answer_mode)
-            serialized_sources = [
-                {
-                    "text": source.text,
-                    "score": source.score,
-                    "document": source.document,
-                    "chunk_id": source.chunk_id,
-                }
-                for source in assistant.sources
-            ]
-            display_sources(serialized_sources)
+            display_answer_mode(assistant.answer_mode, assistant.content)
+            display_sources([serialize_source(source) for source in assistant.sources])
 
 
 def render_documents_tab(
@@ -669,137 +678,98 @@ def render_document_library(
     )
 
 
-def render_evaluation_tab(
-    client: HomelabAPIClient,
-) -> None:
-    st.subheader("Retrieval evaluation")
-    st.caption("Run the sample benchmark against the currently indexed corpus.")
-
-    evaluation_top_k = st.slider(
-        label="Evaluation retrieval depth",
-        min_value=1,
-        max_value=20,
-        value=5,
-        step=1,
-        key="evaluation_top_k",
-        help=("Maximum number of retrieved documents evaluated for each benchmark question."),
+def render_forms_tab(client: HomelabAPIClient) -> None:
+    st.subheader("Forms")
+    st.caption(
+        "Upload a Word (.docx) or fillable PDF form. Suggested answers come only from your own "
+        "documents, never from the web. Review everything before you use the filled form."
     )
 
-    if st.button(
-        "Run evaluation",
-        type="primary",
-        use_container_width=True,
-    ):
-        with st.spinner("Running retrieval benchmark..."):
-            try:
-                result = client.evaluate(
-                    top_k=int(evaluation_top_k),
-                )
-            except ValueError as exc:
-                st.warning(str(exc))
-            except HomelabAPIError as exc:
-                st.error(f"Evaluation failed: {exc}")
-                st.session_state.backend_status = None
-            else:
-                st.session_state.evaluation_result = result
-
-    evaluation_result = st.session_state.evaluation_result
-
-    if evaluation_result is None:
-        st.info("Run the benchmark to calculate retrieval metrics.")
+    uploaded = st.file_uploader("Form to fill", type=["docx", "pdf"], key="form_upload")
+    if uploaded is None:
         return
 
-    display_evaluation_result(evaluation_result)
+    content = uploaded.getvalue()
+    form_key = f"{uploaded.name}:{len(content)}"
 
+    if st.button("Find fields and suggest answers", type="primary"):
+        with st.spinner("Reading the form and searching your documents..."):
+            try:
+                st.session_state.form_proposal = (
+                    form_key,
+                    client.propose_form(uploaded.name, content),
+                )
+            except HomelabAPIError as exc:
+                st.error(str(exc))
+                return
+        st.session_state.pop("filled_form", None)
 
-def display_evaluation_result(
-    result: EvaluationResult,
-) -> None:
-    metrics = result.metrics
+    stored = st.session_state.get("form_proposal")
+    if not stored or stored[0] != form_key:
+        return
+    proposal = stored[1]
 
-    st.divider()
-
-    first_row = st.columns(3)
-
-    first_row[0].metric(
-        "Hit@1",
-        f"{metrics.hit_at_1:.1%}",
-    )
-    first_row[1].metric(
-        "Hit@5",
-        f"{metrics.hit_at_5:.1%}",
-    )
-    first_row[2].metric(
-        "MRR",
-        f"{metrics.mean_reciprocal_rank:.3f}",
-    )
-
-    second_row = st.columns(3)
-
-    second_row[0].metric(
-        "Precision@5",
-        f"{metrics.precision_at_5:.1%}",
-    )
-    second_row[1].metric(
-        "Recall@5",
-        f"{metrics.recall_at_5:.1%}",
-    )
-    second_row[2].metric(
-        "Questions",
-        str(metrics.question_count),
-    )
-
-    st.caption(f"Top K: `{result.top_k}` · Elapsed time: `{result.elapsed_ms:.2f} ms`")
-
-    st.divider()
-    st.markdown("### Per-question results")
-
-    rows = [
-        {
-            "Question": question.question,
-            "Relevant documents": ", ".join(question.relevant_documents),
-            "Retrieved documents": ", ".join(question.retrieved_documents),
-            "Hit@1": question.hit_at_1,
-            "Hit@5": question.hit_at_5,
-            "Precision@5": (question.precision_at_5),
-            "Recall@5": (question.recall_at_5),
-            "Reciprocal rank": (question.reciprocal_rank),
-        }
-        for question in result.questions
-    ]
-
-    st.dataframe(
-        rows,
-        use_container_width=True,
+    st.info(summarize(proposal.fields))
+    rows = st.data_editor(
+        build_rows(proposal.fields),
         hide_index=True,
-        column_config={
-            "Hit@1": (
-                st.column_config.NumberColumn(
-                    format="%.2f",
-                )
-            ),
-            "Hit@5": (
-                st.column_config.NumberColumn(
-                    format="%.2f",
-                )
-            ),
-            "Precision@5": (
-                st.column_config.NumberColumn(
-                    format="%.2f",
-                )
-            ),
-            "Recall@5": (
-                st.column_config.NumberColumn(
-                    format="%.2f",
-                )
-            ),
-            "Reciprocal rank": (
-                st.column_config.NumberColumn(
-                    format="%.3f",
-                )
-            ),
-        },
+        use_container_width=True,
+        disabled=["Field", "Check"],
+        key=f"form_editor_{form_key}",
     )
+
+    ticked = {
+        field.id: st.checkbox(field.label, key=f"form_check_{form_key}_{field.id}")
+        for field in proposal.fields
+        if field.kind == "checkbox"
+    }
+
+    if st.button("Create filled form"):
+        values = collect_values(proposal.fields, list(rows), ticked)
+        try:
+            st.session_state.filled_form = (
+                form_key,
+                client.fill_form(uploaded.name, content, values),
+            )
+        except HomelabAPIError as exc:
+            st.error(str(exc))
+            return
+
+    filled = st.session_state.get("filled_form")
+    if filled and filled[0] == form_key:
+        stem, _, extension = uploaded.name.rpartition(".")
+        st.download_button(
+            "Download filled form",
+            data=filled[1],
+            file_name=f"{stem or uploaded.name}-filled.{extension.lower()}",
+            type="primary",
+        )
+
+
+def render_metrics_tab() -> None:
+    st.subheader("Metrics")
+    st.caption("Live speed and quality of the language model and the retrieval pipeline.")
+
+    if not grafana_is_up(get_grafana_health_url()):
+        st.info(f"The metrics dashboards are not running. Start them with:\n\n`{START_COMMAND}`")
+        return
+
+    base_url = get_grafana_url()
+    selected = st.segmented_control(
+        "Dashboard",
+        options=list(DASHBOARDS),
+        default=next(iter(DASHBOARDS)),
+        key="metrics_dashboard",
+        label_visibility="collapsed",
+    )
+    uid = DASHBOARDS[selected or next(iter(DASHBOARDS))]
+
+    st.link_button(
+        "Open in Grafana",
+        dashboard_url(base_url, uid),
+        help="Opens the full dashboard in a new tab.",
+    )
+    st.iframe(dashboard_url(base_url, uid, embedded=True), height=900)
 
 
 def main() -> None:
@@ -810,6 +780,7 @@ def main() -> None:
     )
 
     initialize_session_state()
+    inject_styles()
 
     client = get_api_client()
 
@@ -818,35 +789,37 @@ def main() -> None:
 
     top_k = render_sidebar(client)
 
-    st.title("Homelab AI")
+    st.markdown(header_html(st.session_state.backend_status is not None), unsafe_allow_html=True)
 
-    (
-        chat_tab,
-        documents_tab,
-        evaluation_tab,
-    ) = st.tabs(
-        [
-            "Chat",
-            "Documents",
-            "Evaluation",
-        ]
+    # Pages rather than tabs: a chat input inside a tab floats mid-page, while one in the main
+    # area stays docked at the bottom of the screen.
+    pages: dict[str, Any] = {}
+    pages["chat"] = st.Page(
+        lambda: render_chat_tab(client=client, top_k=top_k, pages=pages),
+        title="Chat",
+        icon=":material/chat:",
+        default=True,
+    )
+    pages["documents"] = st.Page(
+        lambda: render_documents_tab(client=client),
+        title="Documents",
+        icon=":material/folder_open:",
+        url_path="documents",
+    )
+    pages["forms"] = st.Page(
+        lambda: render_forms_tab(client=client),
+        title="Forms",
+        icon=":material/edit_document:",
+        url_path="forms",
+    )
+    pages["metrics"] = st.Page(
+        render_metrics_tab,
+        title="Metrics",
+        icon=":material/monitoring:",
+        url_path="metrics",
     )
 
-    with chat_tab:
-        render_chat_tab(
-            client=client,
-            top_k=top_k,
-        )
-
-    with documents_tab:
-        render_documents_tab(
-            client=client,
-        )
-
-    with evaluation_tab:
-        render_evaluation_tab(
-            client=client,
-        )
+    st.navigation(list(pages.values()), position="top").run()
 
 
 if __name__ == "__main__":

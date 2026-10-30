@@ -18,6 +18,7 @@ from backend.api.schemas import (
     ConversationMessageResponse,
     ConversationResponse,
     ConversationUpdateRequest,
+    CorrectionResponse,
     SearchMetadata,
     SourceResponse,
 )
@@ -47,6 +48,10 @@ def _source_responses(
                 score=score,
                 document=(str(source["document"]) if source.get("document") is not None else None),
                 chunk_id=(str(source["chunk_id"]) if source.get("chunk_id") is not None else None),
+                citation=(
+                    int(str(source["citation"])) if source.get("citation") is not None else None
+                ),
+                url=(str(source["url"]) if source.get("url") is not None else None),
             ),
         )
     return responses
@@ -230,6 +235,7 @@ def add_conversation_message(
             top_k=request.top_k,
             history=history,
             hybrid=True,
+            web=request.web,
         )
     except RuntimeError as exc:
         logger.exception("Conversation RAG configuration error")
@@ -250,6 +256,8 @@ def add_conversation_message(
             "score": source.score,
             "document": source.document,
             "chunk_id": source.chunk_id,
+            "citation": source.citation,
+            "url": source.url,
         }
         for source in result.sources
     ]
@@ -273,6 +281,12 @@ def add_conversation_message(
             top_k=request.top_k,
             source_count=len(result.sources),
             elapsed_ms=round(elapsed_ms, 2),
+            stages_ms=result.stages_ms,
+            correction=(
+                CorrectionResponse.model_validate(result.correction)
+                if result.correction is not None
+                else None
+            ),
         ),
     )
 
@@ -321,6 +335,7 @@ def stream_conversation_message(
                 top_k=request.top_k,
                 history=history,
                 hybrid=True,
+                web=request.web,
             )
             source_payloads: list[dict[str, object]] = [
                 {
@@ -328,6 +343,8 @@ def stream_conversation_message(
                     "score": source.score,
                     "document": source.document,
                     "chunk_id": source.chunk_id,
+                    "citation": source.citation,
+                    "url": source.url,
                 }
                 for source in result.sources
             ]
@@ -336,6 +353,11 @@ def stream_conversation_message(
                     "type": "start",
                     "answer_mode": result.answer_mode,
                     "sources": source_payloads,
+                    "correction": (
+                        CorrectionResponse.model_validate(result.correction).model_dump()
+                        if result.correction is not None
+                        else None
+                    ),
                 }
             )
 
@@ -361,11 +383,20 @@ def stream_conversation_message(
                     answer_mode=result.answer_mode,
                 )
 
+            elapsed_ms = round((perf_counter() - started_at) * 1_000, 2)
+            stages_ms = result.trace.stages_ms() if result.trace is not None else {}
+            logger.info(
+                "Streamed answer completed elapsed_ms=%.2f answer_mode=%s",
+                elapsed_ms,
+                result.answer_mode,
+                extra={"stages_ms": stages_ms},
+            )
             yield encode_event(
                 {
                     "type": "complete",
                     "assistant_message": _message_response(assistant).model_dump(mode="json"),
-                    "elapsed_ms": round((perf_counter() - started_at) * 1_000, 2),
+                    "elapsed_ms": elapsed_ms,
+                    "stages_ms": stages_ms,
                 }
             )
         except GeneratorExit:

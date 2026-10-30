@@ -1,6 +1,7 @@
 from backend.interfaces.embedder import EmbeddingProvider
 from backend.interfaces.retriever import RetrievalResult
 from backend.interfaces.vector_store import VectorStore
+from backend.observability import stage
 
 
 class DenseRetriever:
@@ -23,11 +24,14 @@ class DenseRetriever:
         if top_k <= 0:
             raise ValueError("top_k must be positive")
 
-        query_vector = self._embedder.embed_text(query)
-        search_results = self._vector_store.search(
-            query_vector=query_vector,
-            top_k=top_k,
-        )
+        with stage("retrieval.embed_query"):
+            query_vector = self._embedder.embed_text(query)
+
+        with stage("retrieval.vector_search"):
+            search_results = self._vector_store.search(
+                query_vector=query_vector,
+                top_k=top_k,
+            )
 
         return [
             RetrievalResult(

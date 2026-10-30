@@ -62,6 +62,25 @@ class Source:
     score: float
     document: str
     chunk_id: str
+    url: str | None = None
+    citation: int | None = None
+
+
+@dataclass(frozen=True)
+class FormFieldProposal:
+    id: str
+    label: str
+    kind: str = "text"
+    value: str | None = None
+    verified: bool = False
+    source: str | None = None
+    snippet: str | None = None
+
+
+@dataclass(frozen=True)
+class FormProposal:
+    filename: str
+    fields: list[FormFieldProposal]
 
 
 @dataclass(frozen=True)
@@ -146,36 +165,6 @@ class Conversation:
     messages: list[ConversationMessage]
     created_at: str
     updated_at: str
-
-
-@dataclass(frozen=True)
-class EvaluationMetrics:
-    question_count: int
-    hit_at_1: float
-    hit_at_5: float
-    precision_at_5: float
-    recall_at_5: float
-    mean_reciprocal_rank: float
-
-
-@dataclass(frozen=True)
-class QuestionEvaluation:
-    question: str
-    relevant_documents: list[str]
-    retrieved_documents: list[str]
-    hit_at_1: float
-    hit_at_5: float
-    precision_at_5: float
-    recall_at_5: float
-    reciprocal_rank: float
-
-
-@dataclass(frozen=True)
-class EvaluationResult:
-    metrics: EvaluationMetrics
-    questions: list[QuestionEvaluation]
-    top_k: int
-    elapsed_ms: float
 
 
 class HomelabAPIClient:
@@ -274,6 +263,8 @@ class HomelabAPIClient:
                         "",
                     )
                 ),
+                url=source.get("url"),
+                citation=source.get("citation"),
             )
             for source in raw_sources
             if isinstance(source, dict)
@@ -369,6 +360,7 @@ class HomelabAPIClient:
         conversation_id: str,
         content: str,
         top_k: int,
+        web: bool = False,
     ) -> Iterator[dict[str, Any]]:
         url = f"{self.base_url}/conversations/{conversation_id}/messages/stream"
         try:
@@ -376,7 +368,7 @@ class HomelabAPIClient:
                 with client.stream(
                     "POST",
                     url,
-                    json={"content": content, "top_k": top_k},
+                    json={"content": content, "top_k": top_k, "web": web},
                 ) as response:
                     response.raise_for_status()
                     for line in response.iter_lines():
@@ -445,6 +437,8 @@ class HomelabAPIClient:
                     score=float(source.get("score", 0.0)),
                     document=str(source.get("document", "unknown")),
                     chunk_id=str(source.get("chunk_id", "")),
+                    url=source.get("url"),
+                    citation=source.get("citation"),
                 )
                 for source in raw_sources
                 if isinstance(source, dict)
@@ -660,161 +654,6 @@ class HomelabAPIClient:
             )
         return documents
 
-    def evaluate(
-        self,
-        top_k: int = 5,
-    ) -> EvaluationResult:
-        if not 1 <= top_k <= 20:
-            raise ValueError("top_k must be between 1 and 20.")
-
-        response = self._request(
-            method="POST",
-            path="/evaluate",
-            json={
-                "top_k": top_k,
-            },
-        )
-
-        raw_metrics = response.get("metrics")
-        raw_questions = response.get(
-            "questions",
-            [],
-        )
-
-        if not isinstance(raw_metrics, dict):
-            raise HomelabAPIError("The backend returned invalid evaluation metrics.")
-
-        if not isinstance(raw_questions, list):
-            raise HomelabAPIError("The backend returned invalid question results.")
-
-        metrics = EvaluationMetrics(
-            question_count=int(
-                raw_metrics.get(
-                    "question_count",
-                    0,
-                )
-            ),
-            hit_at_1=float(
-                raw_metrics.get(
-                    "hit_at_1",
-                    0.0,
-                )
-            ),
-            hit_at_5=float(
-                raw_metrics.get(
-                    "hit_at_5",
-                    0.0,
-                )
-            ),
-            precision_at_5=float(
-                raw_metrics.get(
-                    "precision_at_5",
-                    0.0,
-                )
-            ),
-            recall_at_5=float(
-                raw_metrics.get(
-                    "recall_at_5",
-                    0.0,
-                )
-            ),
-            mean_reciprocal_rank=float(
-                raw_metrics.get(
-                    "mean_reciprocal_rank",
-                    0.0,
-                )
-            ),
-        )
-
-        questions = [
-            self._parse_question_evaluation(question)
-            for question in raw_questions
-            if isinstance(question, dict)
-        ]
-
-        return EvaluationResult(
-            metrics=metrics,
-            questions=questions,
-            top_k=int(
-                response.get(
-                    "top_k",
-                    top_k,
-                )
-            ),
-            elapsed_ms=float(
-                response.get(
-                    "elapsed_ms",
-                    0.0,
-                )
-            ),
-        )
-
-    @staticmethod
-    def _parse_question_evaluation(
-        raw_question: dict[str, Any],
-    ) -> QuestionEvaluation:
-        relevant_documents = raw_question.get(
-            "relevant_documents",
-            [],
-        )
-        retrieved_documents = raw_question.get(
-            "retrieved_documents",
-            [],
-        )
-
-        if not isinstance(
-            relevant_documents,
-            list,
-        ):
-            relevant_documents = []
-
-        if not isinstance(
-            retrieved_documents,
-            list,
-        ):
-            retrieved_documents = []
-
-        return QuestionEvaluation(
-            question=str(
-                raw_question.get(
-                    "question",
-                    "",
-                )
-            ),
-            relevant_documents=[str(document) for document in relevant_documents],
-            retrieved_documents=[str(document) for document in retrieved_documents],
-            hit_at_1=float(
-                raw_question.get(
-                    "hit_at_1",
-                    0.0,
-                )
-            ),
-            hit_at_5=float(
-                raw_question.get(
-                    "hit_at_5",
-                    0.0,
-                )
-            ),
-            precision_at_5=float(
-                raw_question.get(
-                    "precision_at_5",
-                    0.0,
-                )
-            ),
-            recall_at_5=float(
-                raw_question.get(
-                    "recall_at_5",
-                    0.0,
-                )
-            ),
-            reciprocal_rank=float(
-                raw_question.get(
-                    "reciprocal_rank",
-                    0.0,
-                )
-            ),
-        )
-
     def _request(
         self,
         method: str,
@@ -836,15 +675,48 @@ class HomelabAPIClient:
             raise HomelabAPIError("The backend returned an unexpected response format.")
         return payload
 
-    def _request_json_value(
+    def propose_form(self, filename: str, content: bytes) -> FormProposal:
+        response = self._send(
+            "POST",
+            "/forms/propose",
+            files={"file": (filename, content, "application/octet-stream")},
+        )
+        try:
+            payload = response.json()
+            fields = [
+                FormFieldProposal(
+                    id=str(item["id"]),
+                    label=str(item["label"]),
+                    kind=str(item.get("kind", "text")),
+                    value=item.get("value"),
+                    verified=bool(item.get("verified")),
+                    source=item.get("source"),
+                    snippet=item.get("snippet"),
+                )
+                for item in payload["fields"]
+            ]
+        except (ValueError, KeyError, TypeError) as exc:
+            raise HomelabAPIError("The backend returned an invalid form analysis.") from exc
+
+        return FormProposal(filename=str(payload.get("filename", filename)), fields=fields)
+
+    def fill_form(self, filename: str, content: bytes, values: dict[str, str]) -> bytes:
+        response = self._send(
+            "POST",
+            "/forms/fill",
+            files={"file": (filename, content, "application/octet-stream")},
+            data={"values": json.dumps(values)},
+        )
+        return response.content
+
+    def _send(
         self,
         method: str,
         path: str,
         json: dict[str, Any] | None = None,
         files: dict[str, tuple[str, bytes, str]] | None = None,
-        *,
-        allow_empty: bool = False,
-    ) -> Any:
+        data: dict[str, str] | None = None,
+    ) -> httpx.Response:
         url = f"{self.base_url}{path}"
 
         try:
@@ -854,6 +726,7 @@ class HomelabAPIClient:
                     url=url,
                     json=json,
                     files=files,
+                    data=data,
                 )
                 response.raise_for_status()
 
@@ -876,6 +749,19 @@ class HomelabAPIClient:
 
         except httpx.HTTPError as exc:
             raise HomelabAPIError(f"An HTTP error occurred: {exc}") from exc
+
+        return response
+
+    def _request_json_value(
+        self,
+        method: str,
+        path: str,
+        json: dict[str, Any] | None = None,
+        files: dict[str, tuple[str, bytes, str]] | None = None,
+        *,
+        allow_empty: bool = False,
+    ) -> Any:
+        response = self._send(method, path, json=json, files=files)
 
         if allow_empty and not response.content:
             return None

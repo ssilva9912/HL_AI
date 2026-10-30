@@ -26,6 +26,7 @@ from backend.api.rag_service import (
     UnsupportedDocumentTypeError,
 )
 from backend.api.schemas import (
+    CorrectionResponse,
     DocumentResponse,
     EvaluationMetricsResponse,
     EvaluationRequest,
@@ -284,6 +285,7 @@ def search(
         result = rag_service.ask(
             question=question,
             top_k=request.top_k,
+            web=request.web,
         )
     except RuntimeError as exc:
         logger.exception(
@@ -312,6 +314,8 @@ def search(
             score=source.score,
             document=source.document,
             chunk_id=source.chunk_id,
+            citation=source.citation,
+            url=source.url,
         )
         for source in result.sources
     ]
@@ -322,6 +326,7 @@ def search(
         request.top_k,
         len(sources),
         elapsed_ms,
+        extra={"stages_ms": result.stages_ms},
     )
 
     return SearchResponse(
@@ -333,6 +338,12 @@ def search(
             elapsed_ms=round(
                 elapsed_ms,
                 2,
+            ),
+            stages_ms=result.stages_ms,
+            correction=(
+                CorrectionResponse.model_validate(result.correction)
+                if result.correction is not None
+                else None
             ),
         ),
     )
