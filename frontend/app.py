@@ -4,7 +4,6 @@ from typing import Any
 import streamlit as st
 from api import (
     Conversation,
-    EvaluationResult,
     HomelabAPIClient,
     HomelabAPIError,
     IngestionJob,
@@ -25,6 +24,17 @@ from metrics_panel import (
     grafana_is_up,
 )
 from retrieval_notes import describe_correction, looks_like_abstention
+from theme import (
+    ASSISTANT_AVATAR,
+    QUICK_ACTIONS,
+    USER_AVATAR,
+    header_html,
+    inject_styles,
+    section_label,
+    sidebar_brand_html,
+    status_pill,
+    welcome_html,
+)
 
 API_URL = get_api_url()
 DEFAULT_TOP_K = get_default_top_k()
@@ -36,9 +46,6 @@ def initialize_session_state() -> None:
 
     if "backend_status" not in st.session_state:
         st.session_state.backend_status = None
-
-    if "evaluation_result" not in st.session_state:
-        st.session_state.evaluation_result = None
 
     if "ingestion_results" not in st.session_state:
         st.session_state.ingestion_results = []
@@ -170,7 +177,7 @@ def display_chat_history() -> None:
             "documents",
         )
 
-        with st.chat_message(role):
+        with st.chat_message(role, avatar=USER_AVATAR if role == "user" else ASSISTANT_AVATAR):
             st.markdown(link_citations(content, group_citations(sources)))
 
             if role == "assistant":
@@ -182,14 +189,11 @@ def render_sidebar(
     client: HomelabAPIClient,
 ) -> int:
     with st.sidebar:
-        st.header("Homelab AI")
-        st.caption("Local retrieval-augmented generation")
+        st.markdown(sidebar_brand_html(), unsafe_allow_html=True)
 
-        st.divider()
-
-        st.subheader("Conversations")
         if st.button(
             "New conversation",
+            icon=":material/add:",
             use_container_width=True,
             type="primary",
         ):
@@ -208,6 +212,7 @@ def render_sidebar(
             st.warning(f"Could not load conversations: {exc}")
 
         if conversations:
+            st.markdown(section_label("Conversations"), unsafe_allow_html=True)
             conversation_by_id = {conversation.id: conversation for conversation in conversations}
             active_id = st.session_state.active_conversation_id
             if active_id not in conversation_by_id:
@@ -235,7 +240,7 @@ def render_sidebar(
                     st.rerun()
 
             active = conversation_by_id[selected_id]
-            with st.expander("Conversation settings"):
+            with st.expander("Rename or delete"):
                 title = st.text_input(
                     "Title",
                     value=active.title,
@@ -270,21 +275,21 @@ def render_sidebar(
                         st.session_state.messages = []
                         st.rerun()
         else:
-            st.caption("Create a conversation to begin chatting.")
+            st.caption("Start a conversation to begin chatting.")
 
-        st.divider()
+        st.markdown(section_label("Answer settings"), unsafe_allow_html=True)
 
         top_k = st.slider(
-            label="Retrieved sources",
+            label="Sources per answer",
             min_value=1,
             max_value=20,
             value=DEFAULT_TOP_K,
             step=1,
-            help=("Controls how many reranked passages are returned with each answer."),
+            help=("How many of the best-matching passages are used for each answer."),
         )
 
-        st.checkbox(
-            "Search the web",
+        st.toggle(
+            "Search the web when needed",
             key="web_search",
             help=(
                 "Allows an online search when your documents don't cover a question. "
@@ -293,31 +298,24 @@ def render_sidebar(
             ),
         )
 
-        st.divider()
+        st.markdown(section_label("Connection"), unsafe_allow_html=True)
 
         status = st.session_state.backend_status
+        st.markdown(status_pill(status is not None), unsafe_allow_html=True)
 
-        if status is None:
-            st.error("Backend offline")
-            st.caption(f"Start FastAPI on {API_URL}.")
-        else:
-            service = status.get(
-                "service",
-                "homelab-ai",
-            )
-
-            st.success("Backend online")
-            st.caption(f"Service: `{service}`")
-
-        if st.button(
-            "Check backend",
-            use_container_width=True,
-        ):
-            check_backend(client)
-            st.rerun()
-
-        st.divider()
-        st.caption(f"API: `{API_URL}`")
+        with st.expander("Details"):
+            if status is None:
+                st.caption(f"Can't reach the backend. Start it on `{API_URL}`.")
+            else:
+                st.caption(f"Service: `{status.get('service', 'homelab-ai')}`")
+            st.caption(f"API: `{API_URL}`")
+            if st.button(
+                "Check again",
+                icon=":material/refresh:",
+                use_container_width=True,
+            ):
+                check_backend(client)
+                st.rerun()
 
     return int(top_k)
 
@@ -325,15 +323,25 @@ def render_sidebar(
 def render_chat_tab(
     client: HomelabAPIClient,
     top_k: int,
+    pages: dict[str, Any],
 ) -> None:
-    st.subheader("Document chat")
-    st.caption(
-        "Ask questions about your documents. Conversations and citations are saved.",
-    )
+    welcome = st.empty()
+    if not st.session_state.messages:
+        with welcome.container():
+            st.markdown(welcome_html(), unsafe_allow_html=True)
+            columns = st.columns(len(QUICK_ACTIONS))
+            for column, (label, icon, target) in zip(columns, QUICK_ACTIONS, strict=True):
+                if column.button(
+                    label,
+                    key=f"quick_action_{target}",
+                    icon=icon,
+                    use_container_width=True,
+                ):
+                    st.switch_page(pages[target])
 
     display_chat_history()
 
-    question = st.chat_input("Ask a question about your documents...")
+    question = st.chat_input("Ask anything about your documents...")
 
     if question is None:
         return
@@ -343,6 +351,8 @@ def render_chat_tab(
     if not cleaned_question:
         st.warning("Enter a question before submitting.")
         return
+
+    welcome.empty()
 
     conversation_id = st.session_state.active_conversation_id
     if conversation_id is None:
@@ -359,10 +369,10 @@ def render_chat_tab(
         content=cleaned_question,
     )
 
-    with st.chat_message("user"):
+    with st.chat_message("user", avatar=USER_AVATAR):
         st.markdown(cleaned_question)
 
-    with st.chat_message("assistant"):
+    with st.chat_message("assistant", avatar=ASSISTANT_AVATAR):
         web_enabled = bool(st.session_state.get("web_search", False))
         note_placeholder = st.empty()
         answer_placeholder = st.empty()
@@ -762,139 +772,6 @@ def render_metrics_tab() -> None:
     st.iframe(dashboard_url(base_url, uid, embedded=True), height=900)
 
 
-def render_evaluation_tab(
-    client: HomelabAPIClient,
-) -> None:
-    st.subheader("Retrieval evaluation")
-    st.caption("Run the sample benchmark against the currently indexed corpus.")
-
-    evaluation_top_k = st.slider(
-        label="Evaluation retrieval depth",
-        min_value=1,
-        max_value=20,
-        value=5,
-        step=1,
-        key="evaluation_top_k",
-        help=("Maximum number of retrieved documents evaluated for each benchmark question."),
-    )
-
-    if st.button(
-        "Run evaluation",
-        type="primary",
-        use_container_width=True,
-    ):
-        with st.spinner("Running retrieval benchmark..."):
-            try:
-                result = client.evaluate(
-                    top_k=int(evaluation_top_k),
-                )
-            except ValueError as exc:
-                st.warning(str(exc))
-            except HomelabAPIError as exc:
-                st.error(f"Evaluation failed: {exc}")
-                st.session_state.backend_status = None
-            else:
-                st.session_state.evaluation_result = result
-
-    evaluation_result = st.session_state.evaluation_result
-
-    if evaluation_result is None:
-        st.info("Run the benchmark to calculate retrieval metrics.")
-        return
-
-    display_evaluation_result(evaluation_result)
-
-
-def display_evaluation_result(
-    result: EvaluationResult,
-) -> None:
-    metrics = result.metrics
-
-    st.divider()
-
-    first_row = st.columns(3)
-
-    first_row[0].metric(
-        "Hit@1",
-        f"{metrics.hit_at_1:.1%}",
-    )
-    first_row[1].metric(
-        "Hit@5",
-        f"{metrics.hit_at_5:.1%}",
-    )
-    first_row[2].metric(
-        "MRR",
-        f"{metrics.mean_reciprocal_rank:.3f}",
-    )
-
-    second_row = st.columns(3)
-
-    second_row[0].metric(
-        "Precision@5",
-        f"{metrics.precision_at_5:.1%}",
-    )
-    second_row[1].metric(
-        "Recall@5",
-        f"{metrics.recall_at_5:.1%}",
-    )
-    second_row[2].metric(
-        "Questions",
-        str(metrics.question_count),
-    )
-
-    st.caption(f"Top K: `{result.top_k}` · Elapsed time: `{result.elapsed_ms:.2f} ms`")
-
-    st.divider()
-    st.markdown("### Per-question results")
-
-    rows = [
-        {
-            "Question": question.question,
-            "Relevant documents": ", ".join(question.relevant_documents),
-            "Retrieved documents": ", ".join(question.retrieved_documents),
-            "Hit@1": question.hit_at_1,
-            "Hit@5": question.hit_at_5,
-            "Precision@5": (question.precision_at_5),
-            "Recall@5": (question.recall_at_5),
-            "Reciprocal rank": (question.reciprocal_rank),
-        }
-        for question in result.questions
-    ]
-
-    st.dataframe(
-        rows,
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "Hit@1": (
-                st.column_config.NumberColumn(
-                    format="%.2f",
-                )
-            ),
-            "Hit@5": (
-                st.column_config.NumberColumn(
-                    format="%.2f",
-                )
-            ),
-            "Precision@5": (
-                st.column_config.NumberColumn(
-                    format="%.2f",
-                )
-            ),
-            "Recall@5": (
-                st.column_config.NumberColumn(
-                    format="%.2f",
-                )
-            ),
-            "Reciprocal rank": (
-                st.column_config.NumberColumn(
-                    format="%.3f",
-                )
-            ),
-        },
-    )
-
-
 def main() -> None:
     st.set_page_config(
         page_title="Homelab AI",
@@ -903,6 +780,7 @@ def main() -> None:
     )
 
     initialize_session_state()
+    inject_styles()
 
     client = get_api_client()
 
@@ -911,45 +789,37 @@ def main() -> None:
 
     top_k = render_sidebar(client)
 
-    st.title("Homelab AI")
+    st.markdown(header_html(st.session_state.backend_status is not None), unsafe_allow_html=True)
 
-    (
-        chat_tab,
-        documents_tab,
-        evaluation_tab,
-        forms_tab,
-        metrics_tab,
-    ) = st.tabs(
-        [
-            "Chat",
-            "Documents",
-            "Evaluation",
-            "Forms",
-            "Metrics",
-        ]
+    # Pages rather than tabs: a chat input inside a tab floats mid-page, while one in the main
+    # area stays docked at the bottom of the screen.
+    pages: dict[str, Any] = {}
+    pages["chat"] = st.Page(
+        lambda: render_chat_tab(client=client, top_k=top_k, pages=pages),
+        title="Chat",
+        icon=":material/chat:",
+        default=True,
+    )
+    pages["documents"] = st.Page(
+        lambda: render_documents_tab(client=client),
+        title="Documents",
+        icon=":material/folder_open:",
+        url_path="documents",
+    )
+    pages["forms"] = st.Page(
+        lambda: render_forms_tab(client=client),
+        title="Forms",
+        icon=":material/edit_document:",
+        url_path="forms",
+    )
+    pages["metrics"] = st.Page(
+        render_metrics_tab,
+        title="Metrics",
+        icon=":material/monitoring:",
+        url_path="metrics",
     )
 
-    with chat_tab:
-        render_chat_tab(
-            client=client,
-            top_k=top_k,
-        )
-
-    with documents_tab:
-        render_documents_tab(
-            client=client,
-        )
-
-    with evaluation_tab:
-        render_evaluation_tab(
-            client=client,
-        )
-
-    with forms_tab:
-        render_forms_tab(client=client)
-
-    with metrics_tab:
-        render_metrics_tab()
+    st.navigation(list(pages.values()), position="top").run()
 
 
 if __name__ == "__main__":

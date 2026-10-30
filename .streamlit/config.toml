@@ -1,0 +1,20 @@
+[client]
+# Hides the Deploy button; this app runs on your own machine.
+toolbarMode = "minimal"
+
+[theme]
+primaryColor = "#7c8cff"
+baseRadius = "large"
+font = "sans-serif"
+
+[theme.light]
+backgroundColor = "#fbfbfe"
+secondaryBackgroundColor = "#eef0fb"
+textColor = "#1c2033"
+primaryColor = "#5b6cf0"
+
+[theme.dark]
+backgroundColor = "#0d1120"
+secondaryBackgroundColor = "#161c33"
+textColor = "#e8ebf7"
+primaryColor = "#8b9bff"
