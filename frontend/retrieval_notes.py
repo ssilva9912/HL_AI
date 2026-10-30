@@ -30,3 +30,13 @@ def describe_correction(correction: dict[str, Any] | None, web_enabled: bool) ->
         return "Your documents don't cover this. Tick “Search the web” to look online."
 
     return None
+
+
+_ABSTENTION_OPENINGS = ("i don't know", "i do not know", "i dont know")
+
+
+def looks_like_abstention(answer: str) -> bool:
+    """Whether the model opened by saying it could not answer from what it was given."""
+
+    opening = answer.strip().lower().lstrip("\"'*_ ").replace("’", "'")
+    return opening.startswith(_ABSTENTION_OPENINGS)

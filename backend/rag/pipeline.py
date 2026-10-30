@@ -129,6 +129,7 @@ class RAGPipeline:
                     question=question,
                     results=relevant_results,
                     history=history,
+                    restated=correction.search_query if correction and history else None,
                 )
                 answer_mode = _sourced_answer_mode(relevant_results)
         RAG_PROMPT_CHARS.observe(len(prompt))

@@ -10,9 +10,11 @@ from api import (
     IngestionJob,
     QueuedUpload,
     SearchResult,
+    Source,
     get_api_url,
     get_default_top_k,
 )
+from citations import format_citation, group_citations, link_citations
 from metrics_panel import (
     DASHBOARDS,
     START_COMMAND,
@@ -21,7 +23,7 @@ from metrics_panel import (
     get_grafana_url,
     grafana_is_up,
 )
-from retrieval_notes import describe_correction
+from retrieval_notes import describe_correction, looks_like_abstention
 
 API_URL = get_api_url()
 DEFAULT_TOP_K = get_default_top_k()
@@ -60,6 +62,17 @@ def check_backend(
     st.session_state.backend_status = health
 
 
+def serialize_source(source: Source) -> dict[str, Any]:
+    return {
+        "text": source.text,
+        "score": source.score,
+        "document": source.document,
+        "chunk_id": source.chunk_id,
+        "citation": source.citation,
+        "url": source.url,
+    }
+
+
 def add_message(
     role: str,
     content: str,
@@ -87,15 +100,7 @@ def load_conversation(
                 "answer_mode",
                 "documents",
             ),
-            "sources": [
-                {
-                    "text": source.text,
-                    "score": source.score,
-                    "document": source.document,
-                    "chunk_id": source.chunk_id,
-                }
-                for source in message.sources
-            ],
+            "sources": [serialize_source(source) for source in message.sources],
         }
         for message in conversation.messages
     ]
@@ -104,66 +109,36 @@ def load_conversation(
 def serialize_sources(
     result: SearchResult,
 ) -> list[dict[str, Any]]:
-    return [
-        {
-            "text": source.text,
-            "score": source.score,
-            "document": source.document,
-            "chunk_id": source.chunk_id,
-        }
-        for source in result.sources
-    ]
+    return [serialize_source(source) for source in result.sources]
 
 
 def display_sources(
     sources: list[dict[str, Any]],
 ) -> None:
-    if not sources:
+    citations = group_citations(sources)
+    if not citations:
         return
 
-    with st.expander(
-        f"Sources ({len(sources)})",
-        expanded=False,
-    ):
-        for index, source in enumerate(
-            sources,
-            start=1,
-        ):
-            document = source.get(
-                "document",
-                "Unknown document",
-            )
-            chunk_id = source.get(
-                "chunk_id",
-                "",
-            )
-            score = float(
-                source.get(
-                    "score",
-                    0.0,
-                )
-            )
-            text = source.get(
-                "text",
-                "",
-            )
+    st.markdown("**Sources**")
+    st.markdown("\n".join(f"- {format_citation(citation)}" for citation in citations))
 
-            st.markdown(f"**{index}. {document}**")
-
-            metadata_parts = [f"Score: `{score:.4f}`"]
-
-            if chunk_id:
-                metadata_parts.append(f"Chunk: `{chunk_id}`")
-
-            st.caption(" · ".join(metadata_parts))
-            st.write(text)
-
-            if index < len(sources):
+    with st.expander("Show passages", expanded=False):
+        for citation in citations:
+            st.markdown(f"**[{citation.number}] {citation.label}**")
+            for passage in citation.passages:
+                metadata_parts = [f"Score: `{float(passage.get('score', 0.0)):.4f}`"]
+                if passage.get("chunk_id"):
+                    metadata_parts.append(f"Chunk: `{passage['chunk_id']}`")
+                st.caption(" · ".join(metadata_parts))
+                st.write(passage.get("text", ""))
+            if citation is not citations[-1]:
                 st.divider()
 
 
-def display_answer_mode(answer_mode: str) -> None:
-    if answer_mode == "general":
+def display_answer_mode(answer_mode: str, answer: str = "") -> None:
+    if answer_mode in {"documents", "web", "documents_web"} and looks_like_abstention(answer):
+        st.caption("The sources found didn't answer this · try rephrasing or check the links below")
+    elif answer_mode == "general":
         st.caption(
             "General local-model answer · not grounded in uploaded documents",
         )
@@ -195,10 +170,10 @@ def display_chat_history() -> None:
         )
 
         with st.chat_message(role):
-            st.markdown(content)
+            st.markdown(link_citations(content, group_citations(sources)))
 
             if role == "assistant":
-                display_answer_mode(answer_mode)
+                display_answer_mode(answer_mode, content)
                 display_sources(sources)
 
 
@@ -391,6 +366,7 @@ def render_chat_tab(
         note_placeholder = st.empty()
         answer_placeholder = st.empty()
         answer = ""
+        citations: list[Any] = []
         stream_completed = False
         try:
             for event in client.stream_conversation_message(
@@ -401,12 +377,13 @@ def render_chat_tab(
             ):
                 event_type = str(event.get("type", ""))
                 if event_type == "start":
+                    citations = group_citations(list(event.get("sources") or []))
                     note = describe_correction(event.get("correction"), web_enabled)
                     if note:
                         note_placeholder.caption(note)
                 elif event_type == "token":
                     answer += str(event.get("content", ""))
-                    answer_placeholder.markdown(f"{answer} _")
+                    answer_placeholder.markdown(f"{link_citations(answer, citations)} _")
                 elif event_type == "complete":
                     stream_completed = True
         except (ValueError, HomelabAPIError) as exc:
@@ -424,7 +401,7 @@ def render_chat_tab(
             st.error("The response stream ended before completion. You can retry.")
             return
 
-        answer_placeholder.markdown(answer)
+        answer_placeholder.markdown(link_citations(answer, citations))
         try:
             conversation = client.get_conversation(conversation_id)
         except HomelabAPIError as exc:
@@ -437,17 +414,8 @@ def render_chat_tab(
         ]
         if assistant_messages:
             assistant = assistant_messages[-1]
-            display_answer_mode(assistant.answer_mode)
-            serialized_sources = [
-                {
-                    "text": source.text,
-                    "score": source.score,
-                    "document": source.document,
-                    "chunk_id": source.chunk_id,
-                }
-                for source in assistant.sources
-            ]
-            display_sources(serialized_sources)
+            display_answer_mode(assistant.answer_mode, assistant.content)
+            display_sources([serialize_source(source) for source in assistant.sources])
 
 
 def render_documents_tab(

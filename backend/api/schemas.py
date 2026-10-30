@@ -27,6 +27,11 @@ class SourceResponse(BaseModel):
     score: float
     document: str | None = None
     chunk_id: str | None = None
+    citation: int | None = Field(
+        default=None,
+        description="The [n] this source is cited as; passages from one document share a number.",
+    )
+    url: str | None = Field(default=None, description="Web page address, for web sources.")
 
 
 class CorrectionResponse(BaseModel):

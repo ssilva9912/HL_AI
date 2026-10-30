@@ -101,6 +101,8 @@ def test_search() -> None:
         "score": 0.95,
         "document": "sample.txt",
         "chunk_id": "chunk-1",
+        "citation": None,
+        "url": None,
     }
     assert body["metadata"]["top_k"] == 5
     assert body["metadata"]["source_count"] == 1

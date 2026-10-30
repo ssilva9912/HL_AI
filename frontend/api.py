@@ -62,6 +62,8 @@ class Source:
     score: float
     document: str
     chunk_id: str
+    url: str | None = None
+    citation: int | None = None
 
 
 @dataclass(frozen=True)
@@ -274,6 +276,8 @@ class HomelabAPIClient:
                         "",
                     )
                 ),
+                url=source.get("url"),
+                citation=source.get("citation"),
             )
             for source in raw_sources
             if isinstance(source, dict)
@@ -446,6 +450,8 @@ class HomelabAPIClient:
                     score=float(source.get("score", 0.0)),
                     document=str(source.get("document", "unknown")),
                     chunk_id=str(source.get("chunk_id", "")),
+                    url=source.get("url"),
+                    citation=source.get("citation"),
                 )
                 for source in raw_sources
                 if isinstance(source, dict)

@@ -138,6 +138,7 @@ class WebRetriever:
         return ParsedDocument(
             source_path=path,
             file_type=WEB_FILE_TYPE,
+            url=page.url,
             content=text,
             metadata=FileMetadata(
                 name=display_name(page.url),

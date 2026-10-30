@@ -11,6 +11,7 @@ class ParsedDocument:
     file_type: str
     content: str
     metadata: FileMetadata
+    url: str | None = None
 
 
 class Parser(Protocol):

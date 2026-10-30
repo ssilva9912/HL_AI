@@ -314,6 +314,8 @@ def search(
             score=source.score,
             document=source.document,
             chunk_id=source.chunk_id,
+            citation=source.citation,
+            url=source.url,
         )
         for source in result.sources
     ]

@@ -48,6 +48,10 @@ def _source_responses(
                 score=score,
                 document=(str(source["document"]) if source.get("document") is not None else None),
                 chunk_id=(str(source["chunk_id"]) if source.get("chunk_id") is not None else None),
+                citation=(
+                    int(str(source["citation"])) if source.get("citation") is not None else None
+                ),
+                url=(str(source["url"]) if source.get("url") is not None else None),
             ),
         )
     return responses
@@ -252,6 +256,8 @@ def add_conversation_message(
             "score": source.score,
             "document": source.document,
             "chunk_id": source.chunk_id,
+            "citation": source.citation,
+            "url": source.url,
         }
         for source in result.sources
     ]
@@ -337,6 +343,8 @@ def stream_conversation_message(
                     "score": source.score,
                     "document": source.document,
                     "chunk_id": source.chunk_id,
+                    "citation": source.citation,
+                    "url": source.url,
                 }
                 for source in result.sources
             ]

@@ -18,7 +18,9 @@ _STRIP_BOUNDARY = re.compile(r"(?<=[.!?])\s+|\n+")
 _MIN_STRIPS_TO_REFINE = 3
 _MAX_QUERY_CHARS = 200
 _HISTORY_TURNS = 4
-_HISTORY_TURN_CHARS = 300
+_USER_TURN_CHARS = 300
+_ASSISTANT_TURN_CHARS = 160
+_YEAR = re.compile(r"\b(?:19|20)\d{2}\b")
 
 
 class Verdict(StrEnum):
@@ -162,25 +164,53 @@ class QueryRewriter:
         for line in raw.splitlines():
             query = line.strip().strip("\"'`").strip()
             if query:
-                return query[:_MAX_QUERY_CHARS]
+                known_text = [question, *(content for _, content in history)]
+                query = self._drop_invented_years(query, known_text)
+                return query[:_MAX_QUERY_CHARS] or question
         return question
+
+    @staticmethod
+    def _drop_invented_years(query: str, known_text: Sequence[str]) -> str:
+        """Small models like to append a year; keep one only if the user actually wrote it."""
+
+        known = {year for text in known_text for year in _YEAR.findall(text)}
+        cleaned = _YEAR.sub(lambda match: match.group(0) if match.group(0) in known else "", query)
+        return " ".join(cleaned.split())
 
     @staticmethod
     def _prompt(question: str, history: Sequence[tuple[str, str]]) -> str:
         turns = [
-            f"{'User' if role == 'user' else 'Assistant'}: {content.strip()[:_HISTORY_TURN_CHARS]}"
+            f"User: {content.strip()[:_USER_TURN_CHARS]}"
+            if role == "user"
+            else f"Assistant: {content.strip()[:_ASSISTANT_TURN_CHARS]}"
             for role, content in history[-_HISTORY_TURNS:]
             if role in {"user", "assistant"} and content.strip()
         ]
         conversation = "\n".join(turns) or "[No prior conversation.]"
 
         return (
-            "Rewrite the question as one standalone web search query. Resolve pronouns "
-            "and references using the conversation, and keep names, versions and dates. "
+            "Write one web search query for the user's latest message.\n"
+            "- Keep what they are actually asking for (price, reviews, public opinion, "
+            "plot, how to do something). When the latest message only changes the "
+            'subject, such as "I meant X" or "what about Y?", carry that request over '
+            "from their earlier question.\n"
+            "- Replace pronouns and references with the names they stand for.\n"
+            "- Use only names, versions and dates that appear in the conversation. "
+            "Never add a year or any other detail that is not there.\n"
             "Reply with only the query, without quotes or explanation.\n\n"
+            "EXAMPLE 1\n"
+            "User: how much does a Tesla Model 3 cost?\n"
+            "Assistant: It starts around forty thousand dollars.\n"
+            "Latest message: what about the Y\n"
+            "Query: Tesla Model Y price\n\n"
+            "EXAMPLE 2\n"
+            "User: what do people think of the new iPhone?\n"
+            "Assistant: I don't know.\n"
+            "Latest message: i meant the pixel\n"
+            "Query: what people think of the Google Pixel\n\n"
             f"CONVERSATION\n{conversation}\n\n"
-            f"QUESTION\n{question.strip()}\n\n"
-            "SEARCH QUERY\n"
+            f"LATEST MESSAGE\n{question.strip()}\n\n"
+            "QUERY\n"
         )
 
 

@@ -137,6 +137,7 @@ def test_web_retriever_returns_ranked_web_chunks() -> None:
     assert results
     assert all(result.retriever == "web" and is_web_chunk(result.chunk) for result in results)
     assert results[0].chunk.source_document.metadata.name == ("python.org/downloads/release/3.13")
+    assert results[0].chunk.source_document.url == HITS[0].url
     assert "released in 2024" in results[0].chunk.content
 
 

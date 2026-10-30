@@ -1,7 +1,7 @@
 import logging
 import mimetypes
 from collections.abc import Callable, Iterator, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from hashlib import sha256
 from pathlib import Path
 from threading import Lock, RLock
@@ -34,6 +34,7 @@ from backend.interfaces.retriever import RetrievalResult
 from backend.llm.ollama_generator import OllamaGenerator
 from backend.observability import RequestTrace, observe_stream, stage, use_trace
 from backend.observability.metrics import CACHE_EVENTS, RAG_CORPUS_CHUNKS, RAG_REQUESTS
+from backend.rag.citations import citation_numbers
 from backend.rag.corrective import (
     Correction,
     Corrector,
@@ -104,6 +105,8 @@ class RAGSource:
     score: float
     document: str | None = None
     chunk_id: str | None = None
+    citation: int | None = None
+    url: str | None = None
 
 
 @dataclass(frozen=True)
@@ -204,6 +207,15 @@ class HomelabRAGService:
             temperature=0.1,
             keep_alive=self._settings.ollama_keep_alive,
             num_predict=self._settings.ollama_num_predict,
+        )
+        # Query rewriting must be repeatable, so it gets its own deterministic, short-output client.
+        self._rewrite_generator = OllamaGenerator(
+            model=self._settings.llm_model,
+            base_url=self._settings.ollama_url,
+            timeout_seconds=self._settings.request_timeout,
+            temperature=0.0,
+            keep_alive=self._settings.ollama_keep_alive,
+            num_predict=64,
         )
         self._embedding_cache: LRUCache[str, list[float]] = LRUCache(
             "query_embedding",
@@ -459,7 +471,9 @@ class HomelabRAGService:
             ),
             reranker=self._reranker,
             web_retriever=web_retriever,
-            rewriter=QueryRewriter(self._generator) if settings.crag_query_rewrite else None,
+            rewriter=(
+                QueryRewriter(self._rewrite_generator) if settings.crag_query_rewrite else None
+            ),
         )
 
     @staticmethod
@@ -546,7 +560,7 @@ class HomelabRAGService:
 
         return RAGAnswer(
             answer=result.answer,
-            sources=[self._normalize_source(source) for source in result.sources],
+            sources=self._normalize_sources(result.sources),
             answer_mode=result.answer_mode,
             stages_ms=trace.stages_ms(),
             correction=self._summarize_correction(result.correction),
@@ -589,7 +603,7 @@ class HomelabRAGService:
                 endpoint="stream",
                 answer_mode=prepared.answer_mode,
             ),
-            sources=[self._normalize_source(source) for source in prepared.sources],
+            sources=self._normalize_sources(prepared.sources),
             answer_mode=prepared.answer_mode,
             trace=trace,
             correction=self._summarize_correction(prepared.correction),
@@ -1142,6 +1156,14 @@ class HomelabRAGService:
                 previous_content,
             )
 
+    @classmethod
+    def _normalize_sources(cls, sources: Sequence[Any]) -> list[RAGSource]:
+        numbers = citation_numbers(sources)
+        return [
+            replace(cls._normalize_source(source), citation=number)
+            for number, source in zip(numbers, sources, strict=True)
+        ]
+
     @staticmethod
     def _normalize_source(
         source: Any,
@@ -1184,4 +1206,5 @@ class HomelabRAGService:
             score=float(source.score),
             document=document_name,
             chunk_id=(str(chunk_index) if chunk_index is not None else None),
+            url=getattr(source_document, "url", None),
         )

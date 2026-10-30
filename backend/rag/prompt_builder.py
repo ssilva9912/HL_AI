@@ -1,6 +1,7 @@
 from collections.abc import Sequence
 
 from backend.interfaces.retriever import RetrievalResult
+from backend.rag.citations import citation_numbers
 
 
 class PromptBuilder:
@@ -18,7 +19,9 @@ class PromptBuilder:
         "If the context truly lacks enough information to answer, say that you "
         "do not know. "
         "Answer directly and concisely. "
-        "Use inline source citations in the format [filename]. "
+        "Cite sources inline by their number in square brackets, such as [1] or "
+        "[2][3], placed right after the claim they support. Never cite file names "
+        "or URLs. "
         "Do not add a separate source list unless the user asks for one."
     )
 
@@ -48,6 +51,7 @@ class PromptBuilder:
         question: str,
         results: Sequence[RetrievalResult],
         history: Sequence[tuple[str, str]] = (),
+        restated: str | None = None,
     ) -> str:
         normalized_question = question.strip()
 
@@ -73,17 +77,28 @@ class PromptBuilder:
             f"{context}\n\n"
             "QUESTION\n"
             "========\n"
-            f"{normalized_question}\n\n"
+            f"{normalized_question}\n"
+            f"{self._restatement(normalized_question, restated)}\n"
             "RESPONSE REQUIREMENTS\n"
             "=====================\n"
             "- Answer the question directly.\n"
             "- Base every claim on the supplied context.\n"
             "- For a why question, connect the described mechanism to its benefit.\n"
-            "- Cite supporting filenames inline, such as [fusion.txt].\n"
+            "- Cite supporting sources inline by number, such as [1] or [2][3].\n"
             "- Do not repeat the full context.\n"
-            "- Do not include a separate source-filenames section.\n\n"
+            "- Do not include a separate list of sources.\n\n"
             "ANSWER\n"
             "======\n"
+        )
+
+    @staticmethod
+    def _restatement(question: str, restated: str | None) -> str:
+        """Spell out what a short follow-up means, so the answer matches the search made for it."""
+
+        if not restated or restated.strip().lower() == question.lower():
+            return ""
+        return (
+            f"(In the context of the conversation, the user is asking about: {restated.strip()})\n"
         )
 
     @staticmethod
@@ -142,12 +157,12 @@ class PromptBuilder:
         sections: list[str] = []
         current_length = 0
 
-        for position, result in enumerate(results, start=1):
+        for number, result in zip(citation_numbers(results), results, strict=True):
             chunk = result.chunk
             source_name = chunk.source_document.metadata.name
 
             section = (
-                f"[Source {position}]\n"
+                f"[Source {number}]\n"
                 f"File: {source_name}\n"
                 f"Chunk: {chunk.chunk_index}\n"
                 f"Relevance score: {result.score:.4f}\n"
