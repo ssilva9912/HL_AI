@@ -387,6 +387,13 @@ Grafana is at <http://127.0.0.1:3001> with the **Homelab AI** dashboard
 preloaded; Prometheus is at <http://127.0.0.1:9090>. Both bind to localhost
 only. Set `GRAFANA_ADMIN_PASSWORD` in `.env` before first start.
 
+A second dashboard, **Homelab AI - LLM throughput**, shows tokens per second,
+prompt processing speed, token volume and Corrective RAG verdicts. Both
+dashboards are also embedded in the app's **Metrics** tab, which tells you how
+to start them when they aren't running. Because Grafana binds to localhost, the
+tab only displays on the machine running the stack; set `HOMELAB_GRAFANA_URL`
+if you put Grafana behind a proxy.
+
 ## Benchmarking
 
 ```bash

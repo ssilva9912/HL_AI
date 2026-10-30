@@ -34,7 +34,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "homelab_llm_last_tokens_per_second",
+          "expr": "homelab_llm_last_tokens_per_second > 0",
           "legendFormat": "Latest response",
           "refId": "A",
           "instant": true
@@ -255,7 +255,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "homelab_llm_last_tokens_per_second",
+          "expr": "homelab_llm_last_tokens_per_second > 0",
           "legendFormat": "latest response",
           "refId": "B"
         }

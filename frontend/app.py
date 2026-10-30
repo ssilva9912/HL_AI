@@ -13,6 +13,14 @@ from api import (
     get_api_url,
     get_default_top_k,
 )
+from metrics_panel import (
+    DASHBOARDS,
+    START_COMMAND,
+    dashboard_url,
+    get_grafana_health_url,
+    get_grafana_url,
+    grafana_is_up,
+)
 from retrieval_notes import describe_correction
 
 API_URL = get_api_url()
@@ -691,6 +699,32 @@ def render_document_library(
     )
 
 
+def render_metrics_tab() -> None:
+    st.subheader("Metrics")
+    st.caption("Live speed and quality of the language model and the retrieval pipeline.")
+
+    if not grafana_is_up(get_grafana_health_url()):
+        st.info(f"The metrics dashboards are not running. Start them with:\n\n`{START_COMMAND}`")
+        return
+
+    base_url = get_grafana_url()
+    selected = st.segmented_control(
+        "Dashboard",
+        options=list(DASHBOARDS),
+        default=next(iter(DASHBOARDS)),
+        key="metrics_dashboard",
+        label_visibility="collapsed",
+    )
+    uid = DASHBOARDS[selected or next(iter(DASHBOARDS))]
+
+    st.link_button(
+        "Open in Grafana",
+        dashboard_url(base_url, uid),
+        help="Opens the full dashboard in a new tab.",
+    )
+    st.iframe(dashboard_url(base_url, uid, embedded=True), height=900)
+
+
 def render_evaluation_tab(
     client: HomelabAPIClient,
 ) -> None:
@@ -846,11 +880,13 @@ def main() -> None:
         chat_tab,
         documents_tab,
         evaluation_tab,
+        metrics_tab,
     ) = st.tabs(
         [
             "Chat",
             "Documents",
             "Evaluation",
+            "Metrics",
         ]
     )
 
@@ -869,6 +905,9 @@ def main() -> None:
         render_evaluation_tab(
             client=client,
         )
+
+    with metrics_tab:
+        render_metrics_tab()
 
 
 if __name__ == "__main__":

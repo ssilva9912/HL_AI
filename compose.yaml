@@ -109,6 +109,8 @@ services:
       HOMELAB_API_URL: http://api:8000
       HOMELAB_REQUEST_TIMEOUT: ${HOMELAB_REQUEST_TIMEOUT:-120}
       HOMELAB_DEFAULT_TOP_K: ${HOMELAB_DEFAULT_TOP_K:-5}
+      HOMELAB_GRAFANA_URL: ${HOMELAB_GRAFANA_URL:-http://localhost:${HOMELAB_GRAFANA_PORT:-3001}}
+      HOMELAB_GRAFANA_HEALTH_URL: http://grafana:3000/api/health
     ports:
       - "127.0.0.1:${HOMELAB_FRONTEND_PORT:-8501}:8501"
     depends_on:
@@ -165,6 +167,8 @@ services:
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      # Lets the app embed the dashboards in its Metrics tab.
+      GF_SECURITY_ALLOW_EMBEDDING: "true"
       GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/homelab-ai.json
     ports:
       - "127.0.0.1:${HOMELAB_GRAFANA_PORT:-3001}:3000"
