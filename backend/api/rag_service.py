@@ -26,6 +26,7 @@ from backend.demo import (
     create_demo_documents,
 )
 from backend.embeddings.ollama_embedder import OllamaEmbedder
+from backend.forms import FieldExtractor, FieldProposal, FormField
 from backend.indexing.indexer import Indexer
 from backend.indexing.models import IndexedCorpus
 from backend.interfaces.embedder import EmbeddedChunk
@@ -66,6 +67,9 @@ SUPPORTED_DOCUMENT_EXTENSIONS = {
 DEFAULT_EVALUATION_DATASET = Path(
     "evaluation/sample_questions.json",
 )
+
+# Passages retrieved per form field; a field is one short fact, so a few are enough.
+_FORM_TOP_K = 3
 
 IndexerFactory = Callable[[], Indexer]
 IngestionProgress = Callable[[str, int, int | None], None]
@@ -209,7 +213,7 @@ class HomelabRAGService:
             num_predict=self._settings.ollama_num_predict,
         )
         # Query rewriting must be repeatable, so it gets its own deterministic, short-output client.
-        self._rewrite_generator = OllamaGenerator(
+        self._short_answer_generator = OllamaGenerator(
             model=self._settings.llm_model,
             base_url=self._settings.ollama_url,
             timeout_seconds=self._settings.request_timeout,
@@ -472,7 +476,7 @@ class HomelabRAGService:
             reranker=self._reranker,
             web_retriever=web_retriever,
             rewriter=(
-                QueryRewriter(self._rewrite_generator) if settings.crag_query_rewrite else None
+                QueryRewriter(self._short_answer_generator) if settings.crag_query_rewrite else None
             ),
         )
 
@@ -487,6 +491,16 @@ class HomelabRAGService:
             search_query=correction.search_query,
             local_score=correction.local_score,
         )
+
+    def propose_form_values(self, fields: Sequence[FormField]) -> list[FieldProposal]:
+        """Suggest a value for each form field from the indexed documents (never the web)."""
+
+        pipeline = self._get_pipeline(self._get_corpus(), _FORM_TOP_K)
+        extractor = FieldExtractor(
+            retrieve=pipeline.retrieve,
+            generator=self._short_answer_generator,
+        )
+        return extractor.propose_all(fields)
 
     def warm_up(self) -> None:
         """

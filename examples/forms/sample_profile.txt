@@ -1,0 +1,14 @@
+Personal profile: Alex Rivera
+
+Full name: Alex Rivera
+Date of birth: March 14, 1991
+Email: alex.rivera@example.com
+Phone: (555) 014-2290
+Home address: 482 Maple Street, Springfield, IL 62704
+
+Current employer: Northwind Analytics
+Job title: Data Engineer
+Years of experience: 7
+
+Emergency contact: Jordan Rivera, (555) 014-7731
+Preferred contact method: email

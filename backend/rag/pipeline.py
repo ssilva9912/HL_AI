@@ -60,6 +60,11 @@ class RAGPipeline:
         self._top_k = top_k
         self._corrector = corrector
 
+    def retrieve(self, query: str) -> list[RetrievalResult]:
+        """Search the corpus without generating an answer."""
+
+        return list(self._retriever.search(query=query.strip(), top_k=self._top_k))
+
     def ask(
         self,
         question: str,

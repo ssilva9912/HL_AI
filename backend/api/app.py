@@ -12,6 +12,7 @@ from backend.api.dependencies import (
     get_queued_ingestion_service,
     get_rag_service,
 )
+from backend.api.form_routes import router as form_router
 from backend.api.ingestion_routes import (
     router as ingestion_router,
 )
@@ -99,6 +100,7 @@ def create_app() -> FastAPI:
 
     application.include_router(api_router)
     application.include_router(ingestion_router)
+    application.include_router(form_router)
     application.include_router(conversation_router)
 
     if get_settings().metrics_enabled:

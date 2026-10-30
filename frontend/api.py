@@ -67,6 +67,23 @@ class Source:
 
 
 @dataclass(frozen=True)
+class FormFieldProposal:
+    id: str
+    label: str
+    kind: str = "text"
+    value: str | None = None
+    verified: bool = False
+    source: str | None = None
+    snippet: str | None = None
+
+
+@dataclass(frozen=True)
+class FormProposal:
+    filename: str
+    fields: list[FormFieldProposal]
+
+
+@dataclass(frozen=True)
 class SearchResult:
     answer: str
     sources: list[Source]
@@ -843,15 +860,48 @@ class HomelabAPIClient:
             raise HomelabAPIError("The backend returned an unexpected response format.")
         return payload
 
-    def _request_json_value(
+    def propose_form(self, filename: str, content: bytes) -> FormProposal:
+        response = self._send(
+            "POST",
+            "/forms/propose",
+            files={"file": (filename, content, "application/octet-stream")},
+        )
+        try:
+            payload = response.json()
+            fields = [
+                FormFieldProposal(
+                    id=str(item["id"]),
+                    label=str(item["label"]),
+                    kind=str(item.get("kind", "text")),
+                    value=item.get("value"),
+                    verified=bool(item.get("verified")),
+                    source=item.get("source"),
+                    snippet=item.get("snippet"),
+                )
+                for item in payload["fields"]
+            ]
+        except (ValueError, KeyError, TypeError) as exc:
+            raise HomelabAPIError("The backend returned an invalid form analysis.") from exc
+
+        return FormProposal(filename=str(payload.get("filename", filename)), fields=fields)
+
+    def fill_form(self, filename: str, content: bytes, values: dict[str, str]) -> bytes:
+        response = self._send(
+            "POST",
+            "/forms/fill",
+            files={"file": (filename, content, "application/octet-stream")},
+            data={"values": json.dumps(values)},
+        )
+        return response.content
+
+    def _send(
         self,
         method: str,
         path: str,
         json: dict[str, Any] | None = None,
         files: dict[str, tuple[str, bytes, str]] | None = None,
-        *,
-        allow_empty: bool = False,
-    ) -> Any:
+        data: dict[str, str] | None = None,
+    ) -> httpx.Response:
         url = f"{self.base_url}{path}"
 
         try:
@@ -861,6 +911,7 @@ class HomelabAPIClient:
                     url=url,
                     json=json,
                     files=files,
+                    data=data,
                 )
                 response.raise_for_status()
 
@@ -883,6 +934,19 @@ class HomelabAPIClient:
 
         except httpx.HTTPError as exc:
             raise HomelabAPIError(f"An HTTP error occurred: {exc}") from exc
+
+        return response
+
+    def _request_json_value(
+        self,
+        method: str,
+        path: str,
+        json: dict[str, Any] | None = None,
+        files: dict[str, tuple[str, bytes, str]] | None = None,
+        *,
+        allow_empty: bool = False,
+    ) -> Any:
+        response = self._send(method, path, json=json, files=files)
 
         if allow_empty and not response.content:
             return None

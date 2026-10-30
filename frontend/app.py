@@ -15,6 +15,7 @@ from api import (
     get_default_top_k,
 )
 from citations import format_citation, group_citations, link_citations
+from forms_panel import build_rows, collect_values, summarize
 from metrics_panel import (
     DASHBOARDS,
     START_COMMAND,
@@ -667,6 +668,74 @@ def render_document_library(
     )
 
 
+def render_forms_tab(client: HomelabAPIClient) -> None:
+    st.subheader("Forms")
+    st.caption(
+        "Upload a Word (.docx) or fillable PDF form. Suggested answers come only from your own "
+        "documents, never from the web. Review everything before you use the filled form."
+    )
+
+    uploaded = st.file_uploader("Form to fill", type=["docx", "pdf"], key="form_upload")
+    if uploaded is None:
+        return
+
+    content = uploaded.getvalue()
+    form_key = f"{uploaded.name}:{len(content)}"
+
+    if st.button("Find fields and suggest answers", type="primary"):
+        with st.spinner("Reading the form and searching your documents..."):
+            try:
+                st.session_state.form_proposal = (
+                    form_key,
+                    client.propose_form(uploaded.name, content),
+                )
+            except HomelabAPIError as exc:
+                st.error(str(exc))
+                return
+        st.session_state.pop("filled_form", None)
+
+    stored = st.session_state.get("form_proposal")
+    if not stored or stored[0] != form_key:
+        return
+    proposal = stored[1]
+
+    st.info(summarize(proposal.fields))
+    rows = st.data_editor(
+        build_rows(proposal.fields),
+        hide_index=True,
+        use_container_width=True,
+        disabled=["Field", "Check"],
+        key=f"form_editor_{form_key}",
+    )
+
+    ticked = {
+        field.id: st.checkbox(field.label, key=f"form_check_{form_key}_{field.id}")
+        for field in proposal.fields
+        if field.kind == "checkbox"
+    }
+
+    if st.button("Create filled form"):
+        values = collect_values(proposal.fields, list(rows), ticked)
+        try:
+            st.session_state.filled_form = (
+                form_key,
+                client.fill_form(uploaded.name, content, values),
+            )
+        except HomelabAPIError as exc:
+            st.error(str(exc))
+            return
+
+    filled = st.session_state.get("filled_form")
+    if filled and filled[0] == form_key:
+        stem, _, extension = uploaded.name.rpartition(".")
+        st.download_button(
+            "Download filled form",
+            data=filled[1],
+            file_name=f"{stem or uploaded.name}-filled.{extension.lower()}",
+            type="primary",
+        )
+
+
 def render_metrics_tab() -> None:
     st.subheader("Metrics")
     st.caption("Live speed and quality of the language model and the retrieval pipeline.")
@@ -848,12 +917,14 @@ def main() -> None:
         chat_tab,
         documents_tab,
         evaluation_tab,
+        forms_tab,
         metrics_tab,
     ) = st.tabs(
         [
             "Chat",
             "Documents",
             "Evaluation",
+            "Forms",
             "Metrics",
         ]
     )
@@ -873,6 +944,9 @@ def main() -> None:
         render_evaluation_tab(
             client=client,
         )
+
+    with forms_tab:
+        render_forms_tab(client=client)
 
     with metrics_tab:
         render_metrics_tab()
